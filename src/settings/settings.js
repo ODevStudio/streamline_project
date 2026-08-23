@@ -19,6 +19,7 @@ import { openModal, shouldUseNumpad, initializeNumpadModal } from '../modules/nu
 import { ensureDye2PluginReady, getDye2VersionInfo, installDye2Plugin, offerDye2Update, checkDye2UpdatesIfDue } from '../modules/dyeStrip.js';
 import { pluginKeywords, pluginListKeywords, subcategoryMatches } from '../modules/settings-search.js';
 import { haYamlBlocks } from '../modules/home-assistant.js';
+import { loadIro } from '../modules/vendor-loader.js';
 
 // Config for each numeric input that should get two-click numpad support
 const SETTINGS_NUMPAD_CONFIGS = {
@@ -191,6 +192,7 @@ let displayStateCache = null;
 function displayState() { return displayStateCache ?? getLastDisplayState(); }
 
 let activeSettingsCategory = null; // New global variable to track the currently active category
+let settingsLanguageListenerInstalled = false;
 
 let pendingChanges = { rea: {}, de1: {}, de1Advanced: {}, workflow: {} };
 function resetPendingChanges() { pendingChanges = { rea: {}, de1: {}, de1Advanced: {}, workflow: {} }; }
@@ -3205,6 +3207,8 @@ let ledError = false;
 let ledPreviewActive = false;  // a live colour is being previewed on the strip
 let ledPaletteDirty = false;   // cross-state edits not yet PUT (deferred to a preview-end seam)
 let ledLastLit = {};           // last lit colour per 'zoneKey:state', restored on power-on
+let iroLoadPromise = null;
+let iroLoadFailed = false;
 const LED_DEFAULT_ON = 'FFFFAAAA5555'; // warm white — default colour when powering a zone on with no history
 
 const LED_PRESETS = [
@@ -3231,7 +3235,22 @@ function ledNormalize(data) {
 
 export function renderLedSettings() {
     if (!window.iro) {
-        return renderErrorState(getTranslation('Lighting'), getTranslation('Colour picker failed to load'));
+        if (!iroLoadPromise && !iroLoadFailed) {
+            iroLoadPromise = loadIro()
+                .then(() => {
+                    iroLoadPromise = null;
+                    if (activeSettingsCategory === 'ledstrip') updateSettingsContentArea('ledstrip');
+                })
+                .catch(error => {
+                    console.error('Colour picker failed to load.', error);
+                    iroLoadPromise = null;
+                    iroLoadFailed = true;
+                    if (activeSettingsCategory === 'ledstrip') updateSettingsContentArea('ledstrip');
+                });
+        }
+        return iroLoadFailed
+            ? renderErrorState(getTranslation('Lighting'), getTranslation('Colour picker failed to load'))
+            : renderLoadingState(getTranslation('Lighting'));
     }
     if (ledState === null && !ledError) {
         getLedStrip()
@@ -4759,8 +4778,14 @@ export function renderLanguageSettings() {
             switcher.appendChild(option);
         });
 
-        switcher.addEventListener('change', (event) => {
-            setLanguage(event.target.value);
+        switcher.addEventListener('change', async (event) => {
+            event.target.disabled = true;
+            try {
+                await setLanguage(event.target.value);
+                event.target.value = getCurrentLanguage();
+            } finally {
+                event.target.disabled = false;
+            }
         });
     }, 0);
 
@@ -6464,10 +6489,13 @@ export async function initializeSettings() {
     setupSettingsSearch();
 
     // Apply translations to the settings page
-    setLanguage(getCurrentLanguage());
+    await setLanguage(getCurrentLanguage());
 
     // Re-translate settings content whenever language changes
-    document.addEventListener('streamline:languagechange', handleSettingsLanguageChange);
+    if (!settingsLanguageListenerInstalled) {
+        document.addEventListener('streamline:languagechange', handleSettingsLanguageChange);
+        settingsLanguageListenerInstalled = true;
+    }
 
     // Expose update functions to global scope for inline event handlers
     window.updateReaSetting = updateReaSetting;

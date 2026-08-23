@@ -32,8 +32,14 @@ function initLanguageSwitcher() {
     });
 
     // Add event listener
-    switcher.addEventListener('change', (event) => {
-        setLanguage(event.target.value);
+    switcher.addEventListener('change', async (event) => {
+        event.target.disabled = true;
+        try {
+            await setLanguage(event.target.value);
+            event.target.value = getCurrentLanguage();
+        } finally {
+            event.target.disabled = false;
+        }
     });
 }
 

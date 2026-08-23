@@ -1400,6 +1400,57 @@ function updateChartColors(theme) {
     chartData.weight.line.color = isDark ? '#695f57' : baseChartData.weight.line.color;
 }
 
+let chartWindowResizeTimeout = 0;
+let chartElementResizeTimeout = 0;
+let observedChartElement = null;
+let chartResizeObserver = null;
+let chartLifecycleBound = false;
+
+function resizeChartElement(element) {
+    if (!element || element.offsetParent === null || !element.clientHeight || !element.clientWidth) return;
+    try {
+        Plotly.relayout(element, { width: element.clientWidth, height: element.clientHeight });
+        refreshLabelMargin();
+    } catch (_) {}
+}
+
+function handleChartWindowResize() {
+    clearTimeout(chartWindowResizeTimeout);
+    chartWindowResizeTimeout = setTimeout(() => resizeChartElement(getChartElement()), 100);
+}
+
+function handleChartElementResize() {
+    clearTimeout(chartElementResizeTimeout);
+    chartElementResizeTimeout = setTimeout(() => resizeChartElement(observedChartElement), 100);
+}
+
+function handleChartStorage(event) {
+    if (event.key === 'theme') setTheme(event.newValue || 'light');
+}
+
+function handleChartLanguageChange() {
+    refreshLabelMargin();
+}
+
+function ensureChartLifecycle() {
+    if (!chartLifecycleBound) {
+        window.addEventListener('resize', handleChartWindowResize);
+        window.addEventListener('storage', handleChartStorage);
+        document.addEventListener('streamline:languagechange', handleChartLanguageChange);
+        chartLifecycleBound = true;
+    }
+    if (!chartResizeObserver && window.ResizeObserver) {
+        chartResizeObserver = new window.ResizeObserver(handleChartElementResize);
+    }
+}
+
+function observeChartElement(element) {
+    if (!chartResizeObserver || observedChartElement === element) return;
+    if (observedChartElement) chartResizeObserver.unobserve(observedChartElement);
+    observedChartElement = element;
+    chartResizeObserver.observe(element);
+}
+
 export function initChart() {
     console.log('initChart: Starting chart initialization');
 
@@ -1418,6 +1469,8 @@ export function initChart() {
 
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layout);
+    ensureChartLifecycle();
+    observeChartElement(element);
 
     // No Plotly.newPlot here: the CSS scaling pass (initScaling) hasn't run
     // yet at this point during boot, so drawing now would measure the
@@ -1426,70 +1479,6 @@ export function initChart() {
     // first real draw (plotHistoricalShot / clearChart / plotProfile, all of
     // which call Plotly.react and work fine as an initial draw) happens once
     // there's actual data to show, by which point scaling has settled.
-
-    let resizeTimeout;
-    console.log('initChart: Adding resize event listener');
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
-            const resizeElement = getChartElement();
-            console.log('initChart: Window resize event, checking chart visibility');
-            if (resizeElement && resizeElement.offsetParent !== null) {
-                console.log('initChart: Chart element is visible, attempting resize');
-                try {
-                    Plotly.Plots.resize(resizeElement);
-                    // Recompute label range against the now-visible width — fixes
-                    // bogus ranges left over from a live tick that fired while
-                    // the chart was hidden (clientWidth = 0).
-                    refreshLabelMargin();
-                    console.log('initChart: Chart resized successfully');
-                } catch (error) {
-                    console.warn('Could not resize chart, element may not be visible:', error);
-                }
-            } else {
-                console.log('initChart: Chart element not visible or not found, skipping resize');
-            }
-        }, 100);
-    });
-    
-    // The window-resize handler above fires before scaling.js has written the new
-    // canvas height, so on a screen taller than 16:10 the container grows after
-    // Plotly has already measured it and the plot keeps its old height with white
-    // space below. Observing the container catches the real size change.
-    //
-    // Plots.resize() is not enough here: Plotly writes the computed width/height
-    // back into the layout object we pass it, so after the first draw autosize is
-    // off and the plot is pinned to whatever height it was born at. Setting the
-    // size explicitly from the container is what actually moves it.
-    const chartEl = getChartElement();
-    if (chartEl && window.ResizeObserver) {
-        let roTimeout;
-        new ResizeObserver(() => {
-            clearTimeout(roTimeout);
-            roTimeout = setTimeout(() => {
-                if (chartEl.offsetParent === null) return;   // hidden (subpage open)
-                if (!chartEl.clientHeight || !chartEl.clientWidth) return;
-                try {
-                    Plotly.relayout(chartEl, { width: chartEl.clientWidth, height: chartEl.clientHeight });
-                    refreshLabelMargin();
-                } catch (e) { /* not plotted yet */ }
-            }, 100);
-        }).observe(chartEl);
-    }
-
-    // Listen for theme changes to update the chart when the theme changes
-    window.addEventListener('storage', (event) => {
-        if (event.key === 'theme') {
-            const newTheme = event.newValue || 'light';
-            setTheme(newTheme);
-        }
-    });
-
-    // Re-render labels and grow the plot range when the UI language changes —
-    // translated label widths differ, so range padding must follow.
-    document.addEventListener('streamline:languagechange', () => {
-        refreshLabelMargin();
-    });
 
     console.log('initChart: Chart initialization completed');
 }

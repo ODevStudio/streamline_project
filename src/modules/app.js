@@ -1437,10 +1437,11 @@ if (assignedProfileRecord && assignedProfileRecord.profile &&
         // everything as "changed".
         seedWorkflowTiles(workflow);
         startWorkflowWatch();
-
+        return workflow;
     } catch (error) {
         logger.error("Failed to load initial data:", error);
         ui.updateProfileName("Error loading profile");
+        return null;
     }
 }
 
@@ -1808,7 +1809,7 @@ async function initMainPageOnce() {
         window.app.saveGrindToActiveProfile = (val) => profileManager.saveGrindToActiveProfile(val);
         window.app.saveContextToActiveProfile = (fields) => profileManager.saveContextToActiveProfile(fields);
         window.app.getActiveProfileRecord = () => profileManager.getActiveProfileRecord();
-        await loadInitialData();
+        const workflow = await loadInitialData();
         await initializeDe1Connection();
         await initVisualizer();
         connectWebSocket(handleData, onMachineSnapshotSocketOpen);
@@ -1828,10 +1829,9 @@ async function initMainPageOnce() {
         ensureGatewayModeTracking();
         resetDataTimeout();
         connectShotSettingsWebSocket(handleShotSettingsData);
-        getDe1AdvancedSettings();
-        getDe1Settings();
         mainPageInitialized = true;
         logger.info('initMainPageOnce: finished.');
+        return workflow;
     })().catch(err => {
         mainPageInitPromise = null; // allow retry on next showMainPage
         logger.error('initMainPageOnce failed:', err);
@@ -1850,15 +1850,16 @@ window.app.isShotActive = () => shotStartTime !== null;
 // the shared element for the duration of that repaint.
 window.app.clearChart = () => chart.clearChart();
 
-async function prefetchSettingsToIDB() {
+async function prefetchSettingsToIDB(workflow = null) {
     try {
         await openDB();
+        const workflowRequest = workflow ? Promise.resolve(workflow) : getWorkflow();
         const [reaResult, de1Result, de1AdvResult, appInfoResult, workflowResult] = await Promise.allSettled([
             getReaSettings(),
             getDe1Settings(),
             getDe1AdvancedSettings(),
             getAppInfo(),
-            getWorkflow()
+            workflowRequest
         ]);
         const pairs = [
             ['settings-rea',         reaResult],
@@ -1984,12 +1985,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Run main-page init unless we booted on a sub-page; sub-page returns will
         // trigger it lazily via window.app.initMainPageOnce() from the router.
-        if (!isSubPage()) {
-            await initMainPageOnce();
-        }
+        const initialWorkflow = !isSubPage() ? await initMainPageOnce() : null;
 
         // Pre-warm settings cache so the settings page opens without redirecting on slow Rea responses
-        prefetchSettingsToIDB();
+        prefetchSettingsToIDB(initialWorkflow);
 
         logger.info('App initialization finished successfully.');
 

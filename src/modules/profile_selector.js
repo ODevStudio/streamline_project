@@ -10,6 +10,19 @@ import { openContextMenu, closeContextMenu } from './context-menu.js';
 
 // Visualizer credentials storage
 let cachedVisualizerCredentials = null;
+const initializedProfileRoots = new WeakSet();
+let profilesUpdatedListenerInstalled = false;
+
+function handleProfilesUpdated() {
+    logger.info('Received profiles-updated event, re-rendering profile list.');
+    renderProfiles();
+}
+
+function ensureProfilesUpdatedListener() {
+    if (profilesUpdatedListenerInstalled) return;
+    document.addEventListener('profiles-updated', handleProfilesUpdated);
+    profilesUpdatedListenerInstalled = true;
+}
 
 /**
  * Check if Visualizer credentials are configured
@@ -1349,6 +1362,12 @@ function filterProfiles(searchTerm) {
 export async function initializeProfileSelector() {
     console.log('initializeProfileSelector: Starting initialization');
 
+    const pageRoot =
+        document.querySelector('div[role="dialog"][aria-labelledby="page_title"]')
+        || document.getElementById('profile-editor-grid');
+    if (!pageRoot || initializedProfileRoots.has(pageRoot)) return;
+    initializedProfileRoots.add(pageRoot);
+
     // Reset the selected profile key to ensure first profile gets selected on page load
     selectedProfileKey = null;
 
@@ -1358,9 +1377,6 @@ export async function initializeProfileSelector() {
     // Suppress browser-default selection/long-press/drag/callout across the whole
     // profile-selector page. Delegated listeners on the root also cover items
     // added later by renderProfiles() / filterProfiles().
-    const pageRoot =
-        document.querySelector('div[role="dialog"][aria-labelledby="page_title"]')
-        || document.getElementById('profile-editor-grid');
     suppressBrowserActions(pageRoot);
 
     // Fetching the profiles is the long pole and needs nothing from the DOM, so
@@ -1484,14 +1500,7 @@ export async function initializeProfileSelector() {
         }
     }
 
-    // Listen for profile updates from the manager
-    // We'll handle potential duplicate listeners by checking if one already exists
-    // For now, we'll just add the listener - the event system should handle multiple similar listeners gracefully
-    document.addEventListener('profiles-updated', () => {
-        logger.info('Received profiles-updated event, re-rendering profile list.');
-        console.log('initializeProfileSelector: profiles-updated event received, re-rendering profiles');
-        renderProfiles();
-    });
+    ensureProfilesUpdatedListener();
 
     console.log('initializeProfileSelector: Initializing resizable panels');
     initResizablePanels('separator');

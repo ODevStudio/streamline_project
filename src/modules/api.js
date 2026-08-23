@@ -89,14 +89,16 @@ export function setFirmwareFlashInFlight(value) {
 const de1SettingsCache = {
     data: null,
     timestamp: null,
-    TTL: 60000 // 60 seconds TTL
+    TTL: 60000,
+    inFlight: null
 };
 
 // Caching for DE1 advanced settings to improve performance when navigating to settings page
 const de1AdvancedSettingsCache = {
     data: null,
     timestamp: null,
-    TTL: 40000 // 40 seconds TTL
+    TTL: 40000,
+    inFlight: null
 };
 const reatsettingscache = {
     data: null,
@@ -1514,36 +1516,33 @@ export async function getDe1Settings() {
         }
     }
 
+    if (de1SettingsCache.inFlight) return de1SettingsCache.inFlight;
+    de1SettingsCache.inFlight = (async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/machine/settings`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                const error = new Error(`Failed to get DE1 settings: ${response.statusText}`);
+                error.status = response.status;
+                error.statusText = response.statusText;
+                error.responseBody = errorText;
+                throw error;
+            }
+            const data = await response.json();
+            de1SettingsCache.data = data;
+            de1SettingsCache.timestamp = Date.now();
+            return data;
+        } catch (error) {
+            logger.error("Error in getDe1Settings:", error);
+            if (error.status === 500) throw error;
+            if (de1SettingsCache.data) return de1SettingsCache.data;
+            return null;
+        }
+    })();
     try {
-        const response = await fetch(`${API_BASE_URL}/machine/settings`);
-        if (!response.ok) {
-            // Throw an error that includes the status code for better error handling
-            const errorText = await response.text(); // Get response body for more details
-            const error = new Error(`Failed to get DE1 settings: ${response.statusText}`);
-            error.status = response.status; // Add status code to error object
-            error.statusText = response.statusText;
-            error.responseBody = errorText;
-            throw error;
-        }
-        const data = await response.json();
-
-        // Update the cache with new data
-        de1SettingsCache.data = data;
-        de1SettingsCache.timestamp = Date.now();
-
-        return data;
-    } catch (error) {
-        logger.error("Error in getDe1Settings:", error);
-        
-        if (error.status === 500) {
-            throw error;
-        }
-        
-        // Return cached data if available, even if expired, to avoid breaking functionality
-        if (de1SettingsCache.data) {
-            return de1SettingsCache.data;
-        }
-        return null;
+        return await de1SettingsCache.inFlight;
+    } finally {
+        de1SettingsCache.inFlight = null;
     }
 }
 
@@ -1582,52 +1581,45 @@ export async function getDe1AdvancedSettings() {
         }
     }
 
-    const controller = new AbortController();
-    const timeoutMs = 20000; // DE1 advanced settings = 9 MMR reads over BLE; slow when the machine is busy
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    if (de1AdvancedSettingsCache.inFlight) return de1AdvancedSettingsCache.inFlight;
+    de1AdvancedSettingsCache.inFlight = (async () => {
+        const controller = new AbortController();
+        const timeoutMs = 20000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        const url = `${API_BASE_URL}/machine/settings/advanced`;
+        logger.info(`Fetching advanced settings from: ${url}`);
 
-    const url = `${API_BASE_URL}/machine/settings/advanced`;
-    logger.info(`Fetching advanced settings from: ${url}`); // Log the URL
-
-    try {
-        const response = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId); // Clear the timeout if the fetch completes in time
-
-        if (!response.ok) {
-            // Throw an error that includes the status code for better error handling
-            const errorText = await response.text(); // Get response body for more details
-            const error = new Error(`Failed to get DE1 advanced settings: ${response.statusText}`);
-            error.status = response.status; // Add status code to error object
-            error.statusText = response.statusText;
-            error.responseBody = errorText;
-            throw error;
-        }
-        const data = await response.json();
-
-        // Update the cache with new data
-        de1AdvancedSettingsCache.data = data;
-        de1AdvancedSettingsCache.timestamp = Date.now();
-
-        return data;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            logger.error(`Error in getDe1AdvancedSettings: Request timed out after ${timeoutMs} ms.`);
-            // window.location.reload(); // Reload the page on timeout to attempt recovery
-        } else {
-            logger.error("Error in getDe1AdvancedSettings:", error);
-            
-            // Check if this is a 500 error and re-throw with status info
-            if (error.status === 500) {
-                throw error; // Re-throw so calling code can handle 500 specifically
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!response.ok) {
+                const errorText = await response.text();
+                const error = new Error(`Failed to get DE1 advanced settings: ${response.statusText}`);
+                error.status = response.status;
+                error.statusText = response.statusText;
+                error.responseBody = errorText;
+                throw error;
             }
+            const data = await response.json();
+            de1AdvancedSettingsCache.data = data;
+            de1AdvancedSettingsCache.timestamp = Date.now();
+            return data;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                logger.error(`Error in getDe1AdvancedSettings: Request timed out after ${timeoutMs} ms.`);
+            } else {
+                logger.error("Error in getDe1AdvancedSettings:", error);
+                if (error.status === 500) throw error;
+            }
+            if (de1AdvancedSettingsCache.data) return de1AdvancedSettingsCache.data;
+            return null;
         }
-        
-        // Return cached data if available, even if expired, to avoid breaking functionality
-        if (de1AdvancedSettingsCache.data) {
-            return de1AdvancedSettingsCache.data;
-        }
-        return null;
+    })();
+    try {
+        return await de1AdvancedSettingsCache.inFlight;
+    } finally {
+        de1AdvancedSettingsCache.inFlight = null;
     }
 }
 
