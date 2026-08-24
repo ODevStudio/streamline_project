@@ -393,6 +393,7 @@ let liveProfileFrame = -1; // Track current profileFrame for live data
 let pendingTime = 0;
 let redrawTimer = 0;
 let lastRedrawAt = 0;
+const LIVE_X_MIN_SECONDS = 10;
 
 function dtickForTime(time) {
     if (time < 15) return 1;
@@ -418,7 +419,7 @@ function flushChart() {
 
     const theme = localStorage.getItem('theme') || 'light';
     const dtickValue = dtickForTime(pendingTime);
-    const rangeMax = rangeMaxForLabels(pendingTime);
+    const rangeMax = Math.max(LIVE_X_MIN_SECONDS, rangeMaxForLabels(pendingTime));
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     isLiveShot = true;
     applyLabelLayout(layout);
@@ -836,7 +837,12 @@ export function clearChart() {
         return;
     }
     applyLabelLayout(layout);
-    layout.xaxis = { ...layout.xaxis, autorange: true };
+    layout.xaxis = {
+        ...layout.xaxis,
+        range: [0, LIVE_X_MIN_SECONDS],
+        autorange: false,
+        dtick: 1
+    };
     renderMain(Object.values(chartData), layout);
     if (expandedOpen) renderExpandedCharts();
 }

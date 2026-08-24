@@ -39,6 +39,13 @@ test('chart orchestration remains capped and skips the hidden main chart', () =>
     assert.doesNotMatch(chart, /requestAnimationFrame\(\(\) => \{\s*const t = document\.getElementById\('expanded-flow-chart'\)/);
 });
 
+test('a live shot starts at ten seconds and advances at the normal right-edge position', () => {
+    const chart = read('src/modules/chart.js');
+    assert.match(chart, /const LIVE_X_MIN_SECONDS = 10/);
+    assert.match(chart, /Math\.max\(LIVE_X_MIN_SECONDS, rangeMaxForLabels\(pendingTime\)\)/);
+    assert.match(chart, /range: \[0, LIVE_X_MIN_SECONDS\]/);
+});
+
 test('chart module exports remain compatible', () => {
     const chart = read('src/modules/chart.js');
     const exports = [...chart.matchAll(/export function (\w+)\(/g)].map((match) => match[1]);

@@ -202,6 +202,7 @@ export function renderChart(element, traces, layout, interactive = false) {
         charts.set(element, state);
     }
 
+    if (traces.every((trace) => trace.x.length === 0)) state.chart.clear();
     state.chart.setOption(chartOption(traces, layout, interactive, size), {
         notMerge: false,
         replaceMerge: ['series'],

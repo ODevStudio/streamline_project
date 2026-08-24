@@ -5,8 +5,10 @@ import { renderChart } from '../src/modules/echarts-renderer.js';
 
 test('live updates merge series and interpolate between 10 Hz redraws', () => {
     const calls = [];
+    let clears = 0;
     let initOptions;
     const chart = {
+        clear: () => { clears += 1; },
         setOption: (option, settings) => calls.push({ option, settings }),
         resize: () => {},
         dispose: () => {}
@@ -46,4 +48,7 @@ test('live updates merge series and interpolate between 10 Hz redraws', () => {
     assert.equal(calls[0].option.series[0].endLabel.width, 10);
     assert.equal(calls[0].option.series[0].endLabel.shadowBlur, 8);
     assert.equal(calls[0].option.series[0].markPoint, undefined);
+
+    renderChart(element, traces.map((trace) => ({ ...trace, x: [], y: [] })), layout);
+    assert.equal(clears, 1);
 });
