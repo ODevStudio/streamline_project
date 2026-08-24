@@ -393,7 +393,7 @@ let liveProfileFrame = -1; // Track current profileFrame for live data
 let pendingTime = 0;
 let redrawTimer = 0;
 let lastRedrawAt = 0;
-const LIVE_X_MIN_SECONDS = 10;
+const LIVE_X_MIN_SECONDS = 3;
 
 function dtickForTime(time) {
     if (time < 15) return 1;
