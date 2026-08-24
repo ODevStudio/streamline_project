@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { getTranslation } from './i18n.js';
 import { hasMachineGFlow, createScaleFlowResolver, createPourPhaseTracker } from './historical-gflow.js';
-import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange } from './chart-autoscale.js';
+import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions } from './chart-autoscale.js';
 
 // Maps internal trace key → i18n key used for the chart label.
 const LABEL_KEYS = {
@@ -316,13 +316,14 @@ function applyLabelCollisionAvoidance(annotations) {
     }));
     items.sort((a, b) => a.naturalPxY - b.naturalPxY); // top → bottom
 
-    let prevPxY = -Infinity;
-    for (const item of items) {
-        let desired = Math.max(item.naturalPxY, prevPxY + MIN_LABEL_SEP_PX);
-        if (desired > maxPxY) desired = maxPxY;
-        const shiftDownPx = desired - item.naturalPxY;
-        if (shiftDownPx > 0) item.annotation.yshift = -shiftDownPx;
-        prevPxY = desired;
+    const positions = separateLabelPositions(
+        items.map(item => item.naturalPxY),
+        MIN_LABEL_SEP_PX,
+        maxPxY
+    );
+    for (let i = 0; i < items.length; i++) {
+        const shiftPx = positions[i] - items[i].naturalPxY;
+        if (shiftPx !== 0) items[i].annotation.yshift = -shiftPx;
     }
 }
 

@@ -17,6 +17,7 @@ import {
     niceCeil,
     computeExpandedTopYMax,
     computeExpandedTempRange,
+    separateLabelPositions,
 } from '../src/modules/chart-autoscale.js';
 
 test('band constants are the hardware-validated values', () => {
@@ -52,6 +53,11 @@ test('niceCeil: steps of 10 above 80', () => {
     assert.equal(niceCeil(80.1), 90);
     assert.equal(niceCeil(94), 100);
     assert.equal(niceCeil(101), 110);
+});
+
+test('label separation moves a bottom cluster upward without overlap', () => {
+    assert.deepEqual(separateLabelPositions([570, 588, 590], 16, 582), [550, 566, 582]);
+    assert.deepEqual(separateLabelPositions([20, 80, 140], 16, 582), [20, 80, 140]);
 });
 
 // ── computeExpandedTopYMax ───────────────────────────────────────────────────
