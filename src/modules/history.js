@@ -115,7 +115,7 @@ async function loadMoreShots() {
     }
 }
 
-async function displayShot(index) {
+async function displayShot(index, { redrawChart = true } = {}) {
     if (index < 0 || index >= shots.length) {
         logger.warn('Invalid shot index', index);
         return;
@@ -193,7 +193,7 @@ async function displayShot(index) {
         // Skip the redraw if paintNewestShotFast() already drew this exact
         // shot moments ago during boot -- same data, avoid a pointless second
         // chart redraw.
-        if (paintedShotId !== shot.id) {
+        if (redrawChart && paintedShotId !== shot.id) {
             chart.plotHistoricalShot(shots[currentShotIndex].measurements, shots[currentShotIndex].workflow);
             paintedShotId = shot.id;
         }
@@ -389,20 +389,20 @@ export function getNewestShotId() {
 // After a shot finishes, REA can take several seconds to persist it to /shots.
 // A single fixed-delay reload races that write and silently shows the previous
 // shot. Poll the list until a shot newer than `knownNewestId` appears, then
-// render it. ponytail: fixed retry budget, not a server-side watcher.
+// display it. ponytail: fixed retry budget, not a server-side watcher.
 export async function refreshToNewestShot(knownNewestId, tries = 6, intervalMs = 2000, expectedId = null) {
     for (let i = 0; i < tries; i++) {
         await loadShotHistory();
         // Success = the expected shot id is on top (exact, from the shotState
         // feed) — or, without one, any id newer than what we knew before.
         if (shots.length > 0 && (expectedId ? shots[0].id === expectedId : shots[0].id !== knownNewestId)) {
-            await displayShot(0); // labels itself NEWEST
+            await displayShot(0, { redrawChart: false });
             return;
         }
         await new Promise(r => setTimeout(r, intervalMs));
     }
     // Gave up waiting — show whatever is newest so the panel isn't left stale.
-    if (shots.length > 0) displayShot(0);
+    if (shots.length > 0) displayShot(0, { redrawChart: false });
 }
 
 export async function clearShotHistory() {
