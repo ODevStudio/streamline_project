@@ -2,6 +2,7 @@ import { logger } from './logger.js';
 import { getTranslation } from './i18n.js';
 import { hasMachineGFlow, createScaleFlowResolver, createPourPhaseTracker } from './historical-gflow.js';
 import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions } from './chart-autoscale.js';
+import { createLatestTaskRunner } from './latest-task-runner.js';
 
 // Maps internal trace key → i18n key used for the chart label.
 const LABEL_KEYS = {
@@ -26,18 +27,19 @@ const CHART_REDRAW_INTERVAL_MS = 100;
 const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: true };
 const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: false };
 const renderedTraceCounts = new WeakMap();
+const renderQueues = new WeakMap();
 let latestMainRender = null;
 let mainRenderDirty = false;
 
-function renderPlotly(element, traces, layout, config) {
+async function drawPlotly({ element, traces, layout, config }) {
     const traceCount = renderedTraceCounts.get(element);
     if (traceCount !== traces.length) {
+        await Plotly.react(element, traces, layout, config);
         renderedTraceCounts.set(element, traces.length);
-        Plotly.react(element, traces, layout, config);
         return;
     }
 
-    Plotly.update(element, {
+    await Plotly.update(element, {
         x: traces.map((trace) => trace.x),
         y: traces.map((trace) => trace.y),
         name: traces.map((trace) => trace.name),
@@ -47,6 +49,18 @@ function renderPlotly(element, traces, layout, config) {
         'line.dash': traces.map((trace) => trace.line?.dash || 'solid'),
         'line.width': traces.map((trace) => trace.line?.width || 2)
     }, layout, traces.map((_, index) => index));
+}
+
+function renderPlotly(element, traces, layout, config) {
+    let enqueue = renderQueues.get(element);
+    if (!enqueue) {
+        enqueue = createLatestTaskRunner(drawPlotly, (error) => {
+            renderedTraceCounts.delete(element);
+            logger.error('Chart render failed:', error);
+        });
+        renderQueues.set(element, enqueue);
+    }
+    enqueue({ element, traces, layout, config });
 }
 
 function renderMain(traces, layout) {
