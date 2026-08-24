@@ -22,6 +22,45 @@ const STEP_MARKER_COLORS = {
     light: '#7c7c7c'
 };
 
+const CHART_REDRAW_INTERVAL_MS = 100;
+const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: true };
+const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: false };
+const renderedTraceCounts = new WeakMap();
+let latestMainRender = null;
+let mainRenderDirty = false;
+
+function renderPlotly(element, traces, layout, config) {
+    const traceCount = renderedTraceCounts.get(element);
+    if (traceCount !== traces.length) {
+        renderedTraceCounts.set(element, traces.length);
+        Plotly.react(element, traces, layout, config);
+        return;
+    }
+
+    Plotly.update(element, {
+        x: traces.map((trace) => trace.x),
+        y: traces.map((trace) => trace.y),
+        name: traces.map((trace) => trace.name),
+        mode: traces.map((trace) => trace.mode || 'lines'),
+        hoverinfo: traces.map((trace) => trace.hoverinfo || 'name'),
+        'line.color': traces.map((trace) => trace.line?.color),
+        'line.dash': traces.map((trace) => trace.line?.dash || 'solid'),
+        'line.width': traces.map((trace) => trace.line?.width || 2)
+    }, layout, traces.map((_, index) => index));
+}
+
+function renderMain(traces, layout) {
+    latestMainRender = { traces, layout };
+    if (expandedOpen) {
+        mainRenderDirty = true;
+        return;
+    }
+    const element = getChartElement();
+    if (!element) return;
+    renderPlotly(element, traces, layout, MAIN_CHART_CONFIG);
+    mainRenderDirty = false;
+}
+
 // Function to get or update the chart element reference
 function getChartElement() {
     const mainPage = document.getElementById('main-page');
@@ -50,7 +89,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Pressure',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#17c29a' },
         hoverinfo: 'name'
@@ -59,7 +98,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Flow',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#0358cf' },
         hoverinfo: 'name'
@@ -68,7 +107,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Target Pressure',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#bde2d5', dash: 'dot' },
         hoverinfo: 'name'
@@ -77,7 +116,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Target Flow',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#cdd9f5', dash: 'dot' },
         hoverinfo: 'name'
@@ -86,7 +125,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: '°C',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: {color: '#ff97a1'},
         hoverinfo: 'name'
@@ -95,7 +134,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Target °C',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#F9ebec', dash: 'dot' },
         hoverinfo: 'name'
@@ -104,7 +143,7 @@ const baseChartData = {
         x: [],
         y: [],
         name: 'Weight',
-        type: 'lines',
+        type: 'scatter',
         mode: 'lines',
         line: { color: '#D8BDA8' }, // light mode
         hoverinfo: 'name'
@@ -133,7 +172,6 @@ const chartData = JSON.parse(JSON.stringify(baseChartData));
 // The band/axis maths live in chart-autoscale.js (DOM-free, node-tested).
 // ============================================================================
 let expandedOpen = false;      // overlay currently visible
-let expandedInited = false;    // Plotly.newPlot done since last open (containers were 0-size)
 let expandedTopYMax = EXP_TOP_FLOOR;  // damped, monotonic-within-shot top-axis max
 let helpBtnPrevDisplay = '';   // help FAB display value to restore when overlay closes
 // Bumped whenever expandedSeries mutates; drives layout.datarevision. The
@@ -353,9 +391,10 @@ let isLiveShot = false;
 // was just live.
 export function finalizeLiveChart() {
     isLiveShot = false;
-    const element = getChartElement();
-    if (!element) return;
-    Plotly.relayout(element, { annotations: getAnnotations() });
+    const theme = localStorage.getItem('theme') || 'light';
+    const layout = theme === 'dark' ? darkLayout : lightLayout;
+    applyLabelLayout(layout);
+    renderMain(Object.values(chartData), layout);
 }
 
 // Re-measure labels and refresh annotations + x-range so labels stay inside
@@ -367,7 +406,7 @@ export function refreshLabelMargin() {
     // Plotly.relayout below. It's a real, non-cheap layout op with zero
     // visible effect while hidden, and every streamline:languagechange fires
     // this unconditionally regardless of which page is actually showing.
-    if (element.offsetParent === null) return;
+    if (element.offsetParent === null && !expandedOpen) return;
 
     // Find current data max across labelled traces.
     let dataMax = 0;
@@ -378,21 +417,18 @@ export function refreshLabelMargin() {
         const lastX = trace.x[trace.x.length - 1];
         if (lastX > dataMax) dataMax = lastX;
     }
+    const theme = localStorage.getItem('theme') || 'light';
+    const layout = theme === 'dark' ? darkLayout : lightLayout;
+    applyLabelLayout(layout);
     if (dataMax === 0) {
-        // idle / cleared chart — let Plotly autoscale, don't pin a max.
-        Plotly.relayout(element, {
-            annotations: isLiveShot ? [] : getAnnotations(),
-            'xaxis.autorange': true
-        });
+        layout.xaxis = { ...layout.xaxis, autorange: true };
+        renderMain(Object.values(chartData), layout);
         return;
     }
 
     const rangeMax = rangeMaxForLabels(dataMax);
-    Plotly.relayout(element, {
-        annotations: isLiveShot ? [] : getAnnotations(),
-        'xaxis.range': [0, rangeMax],
-        'xaxis.autorange': false
-    });
+    layout.xaxis = { ...layout.xaxis, range: [0, rangeMax], autorange: false };
+    renderMain(Object.values(chartData), layout);
     appliedRangeMax = rangeMax;
 }
 
@@ -424,19 +460,9 @@ let liveProfileFrame = -1; // Track current profileFrame for live data
 // let currentStepIndex = 0; // No longer needed for this logic
 // let stepExitDetected = false; // No longer needed for this logic
 
-// Store pending updates to batch them for better performance
-let pendingUpdates = {
-    shapes: null,
-    annotations: null
-};
-
-// Live chart writes are coalesced to ONE Plotly draw per animation frame.
-// DE1 streams faster than the browser can repaint a growing SVG; calling
-// Plotly.relayout/react on every WebSocket frame backs the redraw queue up and
-// the chart lags behind the real shot. rAF caps work to the display refresh.
-let pendingReact = false;
 let pendingTime = 0;
-let rafHandle = 0;
+let redrawTimer = 0;
+let lastRedrawAt = 0;
 
 function dtickForTime(time) {
     if (time < 15) return 1;
@@ -451,53 +477,35 @@ function dtickForTime(time) {
 let appliedRangeMax = null; // last applied range end
 
 function flushChart() {
-    rafHandle = 0;
-    const element = getChartElement();
-    if (!element) { pendingReact = false; return; }
+    redrawTimer = 0;
+    const now = performance.now();
+    const remaining = CHART_REDRAW_INTERVAL_MS - (now - lastRedrawAt);
+    if (remaining > 0) {
+        redrawTimer = setTimeout(flushChart, remaining);
+        return;
+    }
+    lastRedrawAt = now;
 
     const theme = localStorage.getItem('theme') || 'light';
     const dtickValue = dtickForTime(pendingTime);
     const rangeMax = rangeMaxForLabels(pendingTime);
-
-    // A step marker changed shapes → full react. Then pin the x-range.
-    if (pendingReact) {
-        pendingReact = false;
-        isLiveShot = true; // live from here on — applyLabelLayout gives Plotly no annotations
-        const layout = theme === 'dark' ? darkLayout : lightLayout;
-        applyLabelLayout(layout);
-        Plotly.react(element, Object.values(chartData), layout);
-        Plotly.relayout(element, {
-            'xaxis.range': [0, rangeMax],
-            'xaxis.autorange': false,
-            'xaxis.dtick': dtickValue
-        });
-        appliedRangeMax = rangeMax;
-        if (expandedOpen) renderExpandedCharts();
-        return;
-    }
-
-    // Data + x-range in ONE Plotly.update → one SVG redraw per flush.
-    // (extendTraces + relayout was two full redraws; relayout replots
-    // everything anyway, so incremental append bought nothing.)
-    // chartData holds the full arrays, so restyle from it directly — this
-    // also keeps every trace on its own index (7 traces incl. targetTemperature).
-    const traces = Object.values(chartData);
-    Plotly.update(element,
-        { x: traces.map((t) => t.x), y: traces.map((t) => t.y) },
-        {
-            'xaxis.range': [0, rangeMax],
-            'xaxis.autorange': false,
-            'xaxis.dtick': dtickValue
-        },
-        traces.map((_, i) => i)
-    );
+    const layout = theme === 'dark' ? darkLayout : lightLayout;
+    isLiveShot = true;
+    applyLabelLayout(layout);
+    layout.xaxis = {
+        ...layout.xaxis,
+        range: [0, rangeMax],
+        autorange: false,
+        dtick: dtickValue
+    };
+    renderMain(Object.values(chartData), layout);
     appliedRangeMax = rangeMax;
     if (expandedOpen) renderExpandedCharts();
 }
 
 function scheduleChartFlush() {
-    if (rafHandle) return;
-    rafHandle = requestAnimationFrame(flushChart);
+    if (redrawTimer) return;
+    redrawTimer = setTimeout(flushChart, Math.max(0, CHART_REDRAW_INTERVAL_MS - (performance.now() - lastRedrawAt)));
 }
 
 // ---- Expanded (full-screen) charts -----------------------------------------
@@ -681,7 +689,6 @@ function renderExpandedCharts() {
     const tempEl = document.getElementById('expanded-temp-chart');
     if (!topEl || !tempEl) return;
     const theme = localStorage.getItem('theme') || 'light';
-    const cfg = { displayModeBar: false, responsive: true, staticPlot: false };
     expandedTopYMax = computeExpandedTopYMax(
         [expandedSeries.pressure.y, expandedSeries.flow.y, expandedSeries.targetPressure.y,
          expandedSeries.targetFlow.y, expandedSeries.gflow.y],
@@ -691,14 +698,8 @@ function renderExpandedCharts() {
     const tempLayout = expandedLayout(theme,
         computeExpandedTempRange(expandedSeries.targetTemp.y, expandedSeries.groupTemp.y,
                                  expandedSeries.mixTemp.y, expandedSeries.targetMixTemp.y), true);
-    if (!expandedInited) {
-        Plotly.newPlot(topEl, expandedTopTraces(), topLayout, cfg);
-        Plotly.newPlot(tempEl, expandedTempTraces(), tempLayout, cfg);
-        expandedInited = true;
-    } else {
-        Plotly.react(topEl, expandedTopTraces(), topLayout, cfg);
-        Plotly.react(tempEl, expandedTempTraces(), tempLayout, cfg);
-    }
+    renderPlotly(topEl, expandedTopTraces(), topLayout, EXPANDED_CHART_CONFIG);
+    renderPlotly(tempEl, expandedTempTraces(), tempLayout, EXPANDED_CHART_CONFIG);
 }
 
 export function isExpandedChartOpen() { return expandedOpen; }
@@ -707,7 +708,6 @@ export function openExpandedChart() {
     const overlay = document.getElementById('expanded-chart-overlay');
     if (!overlay) return;
     expandedOpen = true;
-    expandedInited = false; // containers were display:none (0-size) — force a fresh plot
     overlay.style.display = 'flex';
     // The help FAB floats above everything (z-8000, outside the scaled container);
     // tuck it away for a clean full-screen view, remembering its prior state.
@@ -732,8 +732,13 @@ export function closeExpandedChart() {
     if (help) help.style.display = helpBtnPrevDisplay;
     const t = document.getElementById('expanded-flow-chart');
     const b = document.getElementById('expanded-temp-chart');
-    try { if (t) Plotly.purge(t); if (b) Plotly.purge(b); } catch (e) { /* nothing to purge */ }
-    expandedInited = false;
+    try {
+        if (t) { Plotly.purge(t); renderedTraceCounts.delete(t); }
+        if (b) { Plotly.purge(b); renderedTraceCounts.delete(b); }
+    } catch (_) {}
+    if (mainRenderDirty && latestMainRender) {
+        renderMain(latestMainRender.traces, latestMainRender.layout);
+    }
 }
 
 export function setCurrentProfile(profile) {
@@ -783,21 +788,6 @@ function handleProfileFrameChange(currentFrame, time, profile, theme) {
     }
     
     return stepMarkerAdded;
-}
-
-// Function to apply pending updates to the chart
-function applyPendingUpdates() {
-    if (pendingUpdates.shapes || pendingUpdates.annotations) {
-        const element = getChartElement();
-        if (element) {
-            Plotly.relayout(element, {
-                shapes: pendingUpdates.shapes,
-                annotations: pendingUpdates.annotations
-            });
-        }
-        // Reset pending updates
-        pendingUpdates = { shapes: null, annotations: null };
-    }
 }
 
 export function updateChart(shotStartTime, data, weight, weightFlow = null, filterToPouring = true) {
@@ -882,10 +872,7 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
     lastTargetPressureY = targetPressureY;
     lastTargetFlowY = targetFlowY;
 
-    // Points live in chartData; the actual Plotly draw happens once per
-    // animation frame in flushChart(). A step marker forces a full react.
     pendingTime = time;
-    if (stepMarkerAdded) pendingReact = true;
     // Mirror this frame into the expanded (full-screen) charts, in real units.
     pushExpandedFrame(time, data, weightY);
     scheduleChartFlush();
@@ -913,8 +900,8 @@ function resetChartState() {
 
     // Cancel a queued flush so a stale draw from the previous shot can't land
     // on the freshly cleared chart.
-    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = 0; }
-    pendingReact = false;
+    if (redrawTimer) { clearTimeout(redrawTimer); redrawTimer = 0; }
+    lastRedrawAt = 0;
     appliedRangeMax = null;
     isLiveShot = false;
     resetExpandedData();
@@ -938,8 +925,10 @@ export function clearChart() {
         console.error('clearChart: chartElement not found in DOM');
         return;
     }
-    Plotly.react(element, Object.values(chartData), layout);
-    Plotly.relayout(element, { 'xaxis.autorange': true });
+    applyLabelLayout(layout);
+    layout.xaxis = { ...layout.xaxis, autorange: true };
+    renderMain(Object.values(chartData), layout);
+    if (expandedOpen) renderExpandedCharts();
 }
 
 export function plotHistoricalShot(measurements, workflow = null) {
@@ -1204,21 +1193,18 @@ export function plotHistoricalShot(measurements, workflow = null) {
         console.error('plotHistoricalShot: chartElement not found in DOM');
         return;
     }
-    Plotly.react(element, Object.values(chartData), layout, {displayModeBar: false});
-
     if (maxTime > 0) {
         const rangeMax = rangeMaxForLabels(maxTime);
-        Plotly.relayout(element, {
-            'xaxis.range': [0, rangeMax],
-            'xaxis.autorange': false,
-            'xaxis.dtick': dtickValue
-        });
+        layout.xaxis = {
+            ...layout.xaxis,
+            range: [0, rangeMax],
+            autorange: false,
+            dtick: dtickValue
+        };
     } else {
-        Plotly.relayout(element, {
-            'xaxis.autorange': true,
-            'xaxis.dtick': dtickValue
-        });
+        layout.xaxis = { ...layout.xaxis, autorange: true, dtick: dtickValue };
     }
+    renderMain(Object.values(chartData), layout);
 }
 
 // Helper function to check if exit condition is met
@@ -1380,7 +1366,8 @@ export function plotProfile(profile) {
         console.error('plotProfile: chartElement not found in DOM');
         return;
     }
-    Plotly.react(element, plotData, layout, {displayModeBar: false});
+    rebuildExpandedFromChartData();
+    renderMain(plotData, layout);
 }
 
 // Function to update chart colors based on theme
@@ -1407,11 +1394,12 @@ let chartResizeObserver = null;
 let chartLifecycleBound = false;
 
 function resizeChartElement(element) {
+    if (expandedOpen) {
+        renderExpandedCharts();
+        return;
+    }
     if (!element || element.offsetParent === null || !element.clientHeight || !element.clientWidth) return;
-    try {
-        Plotly.relayout(element, { width: element.clientWidth, height: element.clientHeight });
-        refreshLabelMargin();
-    } catch (_) {}
+    refreshLabelMargin();
 }
 
 function handleChartWindowResize() {
@@ -1430,6 +1418,7 @@ function handleChartStorage(event) {
 
 function handleChartLanguageChange() {
     refreshLabelMargin();
+    if (expandedOpen) renderExpandedCharts();
 }
 
 function ensureChartLifecycle() {
@@ -1494,5 +1483,6 @@ export function setTheme(theme) {
         console.error('setTheme: chartElement not found in DOM');
         return;
     }
-    Plotly.react(element, data, layoutUpdate);
+    renderMain(data, layoutUpdate);
+    if (expandedOpen) renderExpandedCharts();
 }

@@ -1,0 +1,2 @@
+src/modules/*.min.js -text
+src/css/*.min.css -text
