@@ -226,10 +226,10 @@ const labelColors = {
         weight: '#C7A58D'
     },
     dark: {
-        pressure: '#17c29a',
-        flow: '#0358cf',
-        groupTemperature: '#AE6D73',
-        weight: '#695f57'
+        pressure: '#20cfa6',
+        flow: '#1f6fdd',
+        groupTemperature: '#c47b83',
+        weight: '#81756b'
     }
 };
 
@@ -1282,17 +1282,20 @@ export function plotProfile(profile) {
 function updateChartColors(theme) {
     const isDark = theme === 'dark';
 
+    chartData.pressure.line.color = isDark ? '#20cfa6' : baseChartData.pressure.line.color;
+    chartData.flow.line.color = isDark ? '#1f6fdd' : baseChartData.flow.line.color;
+
     // Update target flow line color
-    chartData.targetFlow.line.color = isDark ? '#23416c' : baseChartData.targetFlow.line.color;
+    chartData.targetFlow.line.color = isDark ? '#315787' : baseChartData.targetFlow.line.color;
 
     // Update target temperature line color
-    chartData.targetTemperature.line.color = isDark ? '#3e3233' : baseChartData.targetTemperature.line.color;
+    chartData.targetTemperature.line.color = isDark ? '#554345' : baseChartData.targetTemperature.line.color;
 
     // Update temperature line color
-    chartData.groupTemperature.line.color = isDark ? '#AE6D73' : baseChartData.groupTemperature.line.color;
+    chartData.groupTemperature.line.color = isDark ? '#c47b83' : baseChartData.groupTemperature.line.color;
 
     // Update weight line color
-    chartData.weight.line.color = isDark ? '#695f57' : baseChartData.weight.line.color;
+    chartData.weight.line.color = isDark ? '#81756b' : baseChartData.weight.line.color;
 }
 
 let chartWindowResizeTimeout = 0;

@@ -91,6 +91,12 @@ function markerOptions(layout) {
 
 function seriesOption(trace, layout, index, interactive, positions) {
     const annotation = annotationFor(trace, layout);
+    const last = trace.x.length - 1;
+    const showLivePoint = !annotation && !(layout.annotations || []).length && last >= 0 && !trace.line?.dash;
+    const livePointColor = showLivePoint
+        ? window.echarts.color?.lift(trace.line?.color, 0.2) || trace.line?.color
+        : null;
+    const lineWidth = (trace.line?.width || 2) + 1;
     return {
         id: `trace-${index}`,
         name: trace.name,
@@ -102,13 +108,27 @@ function seriesOption(trace, layout, index, interactive, positions) {
         smooth: false,
         connectNulls: false,
         silent: !interactive,
-        animation: false,
         clip: true,
         lineStyle: {
             color: trace.line?.color,
-            width: trace.line?.width || 2,
+            width: lineWidth,
             type: dashType(trace.line?.dash)
         },
+        endLabel: showLivePoint ? {
+            show: true,
+            formatter: ' ',
+            distance: 0,
+            width: (lineWidth + 2) * 2,
+            height: (lineWidth + 2) * 2,
+            padding: 0,
+            color: 'transparent',
+            backgroundColor: livePointColor,
+            borderColor: trace.line?.color,
+            borderWidth: 1,
+            borderRadius: lineWidth + 2,
+            shadowBlur: 8,
+            shadowColor: livePointColor
+        } : { show: false },
         emphasis: { disabled: !interactive },
         markLine: index === 0 ? markerOptions(layout) : undefined,
         markPoint: annotation ? {
@@ -135,7 +155,10 @@ function chartOption(traces, layout, interactive, size) {
     const font = layout.font || {};
     const positions = annotationPositions(layout, size.height);
     return {
-        animation: false,
+        animation: true,
+        animationDuration: 0,
+        animationDurationUpdate: 100,
+        animationEasingUpdate: 'linear',
         backgroundColor: layout.paper_bgcolor || layout.plot_bgcolor || 'transparent',
         textStyle: { color: font.color, fontFamily: 'Inter, sans-serif' },
         grid: {
@@ -167,7 +190,7 @@ export function renderChart(element, traces, layout, interactive = false) {
         element.replaceChildren();
         const chart = window.echarts.init(element, null, {
             renderer: 'canvas',
-            devicePixelRatio: window.devicePixelRatio,
+            devicePixelRatio: Math.min(window.devicePixelRatio, 1.25),
             width: size.width,
             height: size.height
         });
@@ -180,7 +203,8 @@ export function renderChart(element, traces, layout, interactive = false) {
     }
 
     state.chart.setOption(chartOption(traces, layout, interactive, size), {
-        notMerge: true,
+        notMerge: false,
+        replaceMerge: ['series'],
         lazyUpdate: false,
         silent: true
     });
