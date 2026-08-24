@@ -44,6 +44,9 @@ test('a live shot starts at three seconds and advances at the normal right-edge 
     assert.match(chart, /const LIVE_X_MIN_SECONDS = 3/);
     assert.match(chart, /Math\.max\(LIVE_X_MIN_SECONDS, rangeMaxForLabels\(pendingTime\)\)/);
     assert.match(chart, /range: \[0, LIVE_X_MIN_SECONDS\]/);
+    assert.match(chart, /const xRange = isLiveShot && appliedRangeMax !== null \? \[0, appliedRangeMax\] : null/);
+    assert.match(chart, /expandedLayout\(theme, \[0, expandedTopYMax\], false, xRange\)/);
+    assert.match(chart, /true, xRange\)/);
 });
 
 test('chart module exports remain compatible', () => {

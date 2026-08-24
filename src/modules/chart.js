@@ -523,7 +523,7 @@ function expandedAxisColors(theme) {
     };
 }
 
-function expandedLayout(theme, yRange, isTemp) {
+function expandedLayout(theme, yRange, isTemp, xRange) {
     const c = expandedAxisColors(theme);
     return {
         paper_bgcolor: c.paper,
@@ -541,7 +541,10 @@ function expandedLayout(theme, yRange, isTemp) {
         margin: { l: 70, r: 28, t: 88, b: isTemp ? 52 : 48, pad: 0 },
         xaxis: {
             gridcolor: c.grid, linecolor: c.line, tickcolor: c.line,
-            fixedrange: true, autorange: true, zeroline: false,
+            fixedrange: true, zeroline: false,
+            ...(xRange
+                ? { range: xRange, autorange: false, dtick: dtickForTime(pendingTime) }
+                : { autorange: true }),
             title: isTemp ? { text: 'seconds', font: { size: 15 } } : undefined,
         },
         yaxis: {
@@ -615,10 +618,11 @@ function renderExpandedCharts() {
          expandedSeries.targetFlow.y, expandedSeries.gflow.y],
         expandedTopYMax
     );
-    const topLayout = expandedLayout(theme, [0, expandedTopYMax], false);
+    const xRange = isLiveShot && appliedRangeMax !== null ? [0, appliedRangeMax] : null;
+    const topLayout = expandedLayout(theme, [0, expandedTopYMax], false, xRange);
     const tempLayout = expandedLayout(theme,
         computeExpandedTempRange(expandedSeries.targetTemp.y, expandedSeries.groupTemp.y,
-                                 expandedSeries.mixTemp.y, expandedSeries.targetMixTemp.y), true);
+                                 expandedSeries.mixTemp.y, expandedSeries.targetMixTemp.y), true, xRange);
     renderChart(topEl, expandedTopTraces(), topLayout, true);
     renderChart(tempEl, expandedTempTraces(), tempLayout, true);
 }
