@@ -3061,15 +3061,10 @@ export function showGhcControls() {
         grid.style.gridTemplateColumns = '90px 90px 90px 100px 200px 110px';
     });
 
-    // Resize Plotly: clear inline width (set by Plotly at init) then relayout to new size.
-    // 1920px canvas - 480px left aside - 172px GHC = 1268px chart width.
-    // Right margin is computed dynamically from label widths — refresh after resize
-    // so labels stay inside the new plot box.
     const chartEl = document.getElementById('plotly-chart');
     if (chartEl) {
         chartEl.style.width = '';
         requestAnimationFrame(() => requestAnimationFrame(() => {
-            Plotly.relayout(chartEl, { width: 1268 });
             chart.refreshLabelMargin();
         }));
     }
@@ -3100,7 +3095,6 @@ export function hideGhcControls() {
     if (chartEl) {
         chartEl.style.width = '';
         requestAnimationFrame(() => requestAnimationFrame(() => {
-            Plotly.relayout(chartEl, { width: 1460 });
             chart.refreshLabelMargin();
         }));
     }

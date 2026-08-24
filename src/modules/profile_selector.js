@@ -7,6 +7,7 @@ import { initChart, plotProfile } from './chart.js';
 import { translatePage, getTranslation } from './i18n.js';
 import { loadPage } from './router.js';
 import { openContextMenu, closeContextMenu } from './context-menu.js';
+import { destroyChart } from './echarts-renderer.js';
 
 // Visualizer credentials storage
 let cachedVisualizerCredentials = null;
@@ -1381,9 +1382,9 @@ export async function initializeProfileSelector() {
 
     // Fetching the profiles is the long pole and needs nothing from the DOM, so
     // start it before touching the chart. This used to run second, behind an
-    // unconditional 50ms setTimeout and a Plotly init the list does not depend
+    // unconditional 50ms setTimeout and a chart init the list does not depend
     // on -- roughly 80ms of dead time before the request was even issued here,
-    // and far worse on a tablet where Plotly init is CPU-bound.
+    // and far worse on a tablet where chart init is CPU-bound.
     const profilePromise = initProfileManager();
 
     // The router injects the page HTML and awaits a requestAnimationFrame before
@@ -1715,10 +1716,8 @@ document.addEventListener('DOMContentLoaded', initializeProfileSelector);
 document.addEventListener('dynamic-content-loaded', (event) => {
     // Check if this event is for profile selector
     if (event.detail.pageUrl && (event.detail.pageUrl.includes('profile_selector.html') || event.detail.pageUrl.endsWith('profile_selector.html'))) {
-        if (window.Plotly && document.getElementById('plotly-chart')) {
-         const chartDiv = document.getElementById('plotly-chart');
-         Plotly.purge(chartDiv);
-         }
+        const chartDiv = document.getElementById('plotly-chart');
+        if (chartDiv) destroyChart(chartDiv);
         initializeProfileSelector();
     }
 });

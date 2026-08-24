@@ -36,7 +36,7 @@
     <link href="src/css/notes-modal.css" rel="stylesheet" type="text/css" />
     <link href="src/css/context-menu.css" rel="stylesheet" type="text/css" />
     <link href="src/css/help-overlay.css" rel="stylesheet" type="text/css" />
-    <script src="src/modules/plotly-3.1.0.min.js"></script>
+    <script src="src/modules/echarts-6.1.0.min.js"></script>
     <script src="src/modules/reconnecting-websocket.js" defer></script>
     <script src="src/modules/router.js" type="module"></script>
     <script src="src/modules/app.js" type="module"></script>
@@ -253,7 +253,7 @@
                         </div>
                     </div>
 
-                    <!-- Plotly Chart (tap to open full-screen expanded charts) -->
+                    <!-- Chart (tap to open full-screen expanded charts) -->
                     <div id="chart-wrap" class="relative w-full">
                         <div id="plotly-chart" class="w-full h-[650px] border border-l-0 border-r-0 border-[var(--border-color)]" role="img" aria-label="Shot extraction graph"></div>
                         <button id="chart-expand-btn" aria-label="Expand charts to full screen"

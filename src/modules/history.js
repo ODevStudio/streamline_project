@@ -192,7 +192,7 @@ async function displayShot(index) {
     if (shots[currentShotIndex].measurements) {
         // Skip the redraw if paintNewestShotFast() already drew this exact
         // shot moments ago during boot -- same data, avoid a pointless second
-        // Plotly.react().
+        // chart redraw.
         if (paintedShotId !== shot.id) {
             chart.plotHistoricalShot(shots[currentShotIndex].measurements, shots[currentShotIndex].workflow);
             paintedShotId = shot.id;
