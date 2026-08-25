@@ -6,9 +6,76 @@ const SHOTS_STORE_NAME = 'shots';
 const SHOT_SUMMARIES_STORE_NAME = 'shot_summaries';
 const SETTINGS_STORE_NAME = 'settings';
 const EMAILS_STORE_NAME = 'decent_emails';
+const SUMMARY_SEED_SIZE = 20;
+const SUMMARY_BACKFILL_SIZE = 100;
 
 let db;
 let openPromise = null;
+let summaryBackfillNeeded = false;
+
+function seedShotSummaries(shotsStore, summariesStore) {
+    let count = 0;
+    const request = shotsStore.index('by_timestamp').openCursor(null, 'prev');
+    request.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor || count >= SUMMARY_SEED_SIZE) return;
+        summariesStore.put(toShotSummary(cursor.value));
+        count += 1;
+        cursor.continue();
+    };
+}
+
+function repairMissingSummarySeed() {
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction([SHOTS_STORE_NAME, SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+        const shotsStore = transaction.objectStore(SHOTS_STORE_NAME);
+        const summariesStore = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME);
+        let needed = false;
+        const count = summariesStore.count();
+        count.onsuccess = () => {
+            if (count.result > 0) return;
+            const cursor = shotsStore.index('by_timestamp').openCursor(null, 'prev');
+            let seeded = 0;
+            cursor.onsuccess = event => {
+                const current = event.target.result;
+                if (!current || seeded >= SUMMARY_SEED_SIZE) return;
+                needed = true;
+                summariesStore.put(toShotSummary(current.value));
+                seeded += 1;
+                current.continue();
+            };
+        };
+        transaction.oncomplete = () => resolve(needed);
+        transaction.onerror = event => reject(event.target.error);
+    });
+}
+
+function backfillShotSummaries(afterKey = null) {
+    if (!db) return;
+    const transaction = db.transaction([SHOTS_STORE_NAME, SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+    const shotsStore = transaction.objectStore(SHOTS_STORE_NAME);
+    const summariesStore = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME);
+    const range = afterKey === null ? null : IDBKeyRange.lowerBound(afterKey, true);
+    const request = shotsStore.openCursor(range);
+    let count = 0;
+    let lastKey = null;
+    request.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor || count >= SUMMARY_BACKFILL_SIZE) return;
+        summariesStore.put(toShotSummary(cursor.value));
+        lastKey = cursor.key;
+        count += 1;
+        cursor.continue();
+    };
+    transaction.oncomplete = () => {
+        if (count === SUMMARY_BACKFILL_SIZE) setTimeout(() => backfillShotSummaries(lastKey), 0);
+    };
+    transaction.onerror = event => logger.error('Error backfilling shot summaries:', event.target.error);
+}
+
+function scheduleSummaryBackfill() {
+    requestAnimationFrame(() => requestAnimationFrame(() => backfillShotSummaries()));
+}
 
 export function openDB() {
     logger.debug('openDB called.');
@@ -45,7 +112,7 @@ export function openDB() {
             reject('Error opening IndexedDB.');
         };
 
-        request.onsuccess = (event) => {
+        request.onsuccess = async (event) => {
             logger.debug('IndexedDB open request.onsuccess event fired.');
             db = event.target.result;
 
@@ -58,8 +125,18 @@ export function openDB() {
             };
 
             logger.info('IndexedDB opened successfully.');
+            if (!summaryBackfillNeeded) {
+                summaryBackfillNeeded = await repairMissingSummarySeed().catch(error => {
+                    logger.error('Error repairing shot summary seed:', error);
+                    return false;
+                });
+            }
             openPromise = null; // Clear promise on success
             resolve(db);
+            if (summaryBackfillNeeded) {
+                summaryBackfillNeeded = false;
+                scheduleSummaryBackfill();
+            }
         };
 
         request.onupgradeneeded = (event) => {
@@ -88,6 +165,10 @@ export function openDB() {
             }
             if (!shotSummariesStore.indexNames.contains('by_timestamp')) {
                 shotSummariesStore.createIndex('by_timestamp', 'timestamp');
+            }
+            if (event.oldVersion > 0 && event.oldVersion < 9) {
+                seedShotSummaries(shotsStore, shotSummariesStore);
+                summaryBackfillNeeded = true;
             }
             if (!tempDb.objectStoreNames.contains(SETTINGS_STORE_NAME)) {
                 logger.info('Creating settings object store');

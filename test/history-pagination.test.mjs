@@ -17,3 +17,11 @@ test('history pages use one bulk summary write', () => {
     assert.match(idb, /SHOT_SUMMARIES_STORE_NAME = 'shot_summaries'/);
     assert.doesNotMatch(idb, /deleteObjectStore\(EMAILS_STORE_NAME\)/);
 });
+
+test('version 9 seeds and backfills summaries from version 8 shots', () => {
+    assert.match(idb, /event\.oldVersion > 0 && event\.oldVersion < 9/);
+    assert.match(idb, /seedShotSummaries\(shotsStore, shotSummariesStore\)/);
+    assert.match(idb, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+    assert.match(idb, /SUMMARY_BACKFILL_SIZE = 100/);
+    assert.match(idb, /repairMissingSummarySeed/);
+});
