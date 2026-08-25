@@ -21,6 +21,11 @@ export function niceCeil(v) {
     return Math.ceil(v / 10) * 10;
 }
 
+export function pickVisible(series, visibility) {
+    if (!visibility) return series;
+    return series.filter((_, index) => (visibility[index] ?? true) === true);
+}
+
 export function separateLabelPositions(positions, minSeparation, maxPosition, minPosition = 0) {
     if (positions.length < 2) return positions.slice();
     const result = positions.slice();

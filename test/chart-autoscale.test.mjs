@@ -18,6 +18,7 @@ import {
     computeExpandedTopYMax,
     computeExpandedTempRange,
     separateLabelPositions,
+    pickVisible,
 } from '../src/modules/chart-autoscale.js';
 
 test('band constants are the hardware-validated values', () => {
@@ -223,4 +224,18 @@ test('temp band: omitted mix-target argument keeps legacy behaviour', () => {
         computeExpandedTempRange([80], [78], [63], []),
     );
     assert.deepEqual(computeExpandedTempRange([80], [78], [63]), [63, 85]);
+});
+
+test('expanded axes ignore hidden traces', () => {
+    const pressure = [0, 9];
+    const flow = [0, 4];
+    const gflow = [0, 300];
+    assert.equal(computeExpandedTopYMax([pressure, flow, gflow], 0), 320);
+    assert.equal(computeExpandedTopYMax(pickVisible([pressure, flow, gflow], [true, true, 'legendonly']), 0), 12);
+});
+
+test('missing visibility leaves every trace enabled', () => {
+    const series = [[1], [2]];
+    assert.deepEqual(pickVisible(series), series);
+    assert.deepEqual(pickVisible(series, [false]), [series[1]]);
 });

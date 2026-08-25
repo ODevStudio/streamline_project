@@ -48,9 +48,11 @@ test('expanded mode renders only visible charts and restores a dirty main chart'
     assert.match(index, /id="expanded-chart"/);
     assert.doesNotMatch(index, /id="expanded-(flow|temp)-chart"/);
     assert.doesNotMatch(chart, /expandedSeries|expandedDataRev/);
-    assert.match(chart, /computeExpandedTopYMax\(\[\[expandedTopMax\]\], expandedTopYMax\)/);
     assert.match(chart, /renderPlotly\(element, \[\.\.\.expandedTopTraces\(\), \.\.\.expandedTempTraces\(\)\]/);
     assert.match(chart, /\.\.\.chartData\.pressure/);
+    assert.match(chart, /pickVisible\(expandedTopSeriesYs\(\), visibility\)/);
+    assert.match(chart, /plotly_legendclick/);
+    assert.match(chart, /plotly_restyle/);
 });
 
 test('hidden main charts retain one pending render and flush when the main page returns', () => {

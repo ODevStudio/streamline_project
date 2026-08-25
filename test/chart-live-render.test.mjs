@@ -3,7 +3,15 @@ import { test } from 'node:test';
 
 test('live chart frames use one paint-aligned update and defer while hidden', async () => {
     const chartElement = { offsetParent: {}, clientWidth: 960, clientHeight: 390, isConnected: true };
-    const expandedElement = { offsetParent: {}, clientWidth: 1920, clientHeight: 1104, isConnected: true };
+    const plotlyHandlers = {};
+    const expandedElement = {
+        id: 'expanded-chart',
+        offsetParent: {},
+        clientWidth: 1920,
+        clientHeight: 1104,
+        isConnected: true,
+        on(name, handler) { plotlyHandlers[name] = handler; }
+    };
     const expandedOverlay = { style: { display: 'none' } };
     const helpButton = { style: { display: '' } };
     const mainPage = {
@@ -36,13 +44,22 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
 
     const calls = [];
     globalThis.Plotly = {
-        react: async (element, traces) => calls.push({
-            method: 'react',
-            element,
-            lengths: traces.map(trace => trace.x.length),
-            axes: traces.map(trace => [trace.xaxis || 'x', trace.yaxis || 'y'])
-        }),
+        react: async (element, traces) => {
+            element.data = traces.map(trace => ({ ...trace, visible: true }));
+            element._fullLayout = {};
+            calls.push({
+                method: 'react',
+                element,
+                lengths: traces.map(trace => trace.x.length),
+                axes: traces.map(trace => [trace.xaxis || 'x', trace.yaxis || 'y'])
+            });
+        },
         update: async (element, data, layout) => calls.push({ method: 'update', element, lengths: data.x.map(values => values.length), layout }),
+        relayout: async (element, layout) => calls.push({ method: 'relayout', element, layout }),
+        restyle: async (element, key, value) => {
+            if (key === 'visible') element.data.forEach(trace => { trace.visible = value; });
+            calls.push({ method: 'restyle', element, key, value });
+        },
         Plots: { resize: () => {} },
         purge: () => {}
     };
@@ -94,6 +111,15 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     assert.equal(expandedCalls.length, 1);
     assert.equal(expandedCalls[0].lengths.length, 9);
     assert.equal(expandedCalls[0].axes.filter(([x, y]) => x === 'x2' && y === 'y2').length, 4);
+    expandedElement.data.forEach((trace, index) => { trace.visible = index === 0 ? true : 'legendonly'; });
+    assert.equal(plotlyHandlers.plotly_legendclick({ curveNumber: 0 }), false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls.some(call => call.method === 'restyle'), true);
+
+    expandedElement.data[2].visible = 'legendonly';
+    plotlyHandlers.plotly_restyle();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls.some(call => call.method === 'relayout'), true);
 
     chart.updateChart(start, frame(5), 5);
     await new Promise(resolve => setTimeout(resolve, 120));

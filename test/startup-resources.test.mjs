@@ -90,6 +90,13 @@ test('core startup does not wait for Visualizer verification', () => {
     assert.match(app, /Promise\.all\(\[historyInit, profileManager\.init\(\)\]\)/);
 });
 
+test('expanded chart closes on a stationary non-legend tap', () => {
+    const app = read('src/modules/app.js');
+    assert.match(app, /overlay\.addEventListener\('pointerdown'/);
+    assert.match(app, /Math\.hypot\(event\.clientX - downX, event\.clientY - downY\) <= 10/);
+    assert.match(app, /downInLegend \|\| inLegend\(event\.target\)/);
+});
+
 test('production startup logging is disabled', () => {
     const app = read('src/modules/app.js');
     const chart = read('src/modules/chart.js');

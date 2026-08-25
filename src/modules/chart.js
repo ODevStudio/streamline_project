@@ -1,7 +1,7 @@
 import { logger } from './logger.js';
 import { getTranslation } from './i18n.js';
 import { hasMachineGFlow, createScaleFlowResolver, createPourPhaseTracker } from './historical-gflow.js';
-import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions } from './chart-autoscale.js';
+import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions, pickVisible } from './chart-autoscale.js';
 import { createLatestTaskRunner } from './latest-task-runner.js';
 import { loadPlotly } from './vendor-loader.js';
 
@@ -66,6 +66,7 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
         if (!element.isConnected || renderGenerations.get(element) !== generation) return;
         renderedTraceCounts.set(element, traces.length);
         appliedFullRenderRevisions.set(element, requestedFullRevision);
+        ensureExpandedInteractions(element);
         return;
     }
 
@@ -89,6 +90,7 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
     );
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     if (effectiveMode !== 'live') appliedFullRenderRevisions.set(element, requestedFullRevision);
+    ensureExpandedInteractions(element);
 }
 
 function renderPlotly(element, traces, layout, config, mode = 'full') {
@@ -252,7 +254,6 @@ let expandedTopYMax = EXP_TOP_FLOOR;  // damped, monotonic-within-shot top-axis 
 let helpBtnPrevDisplay = '';   // help FAB display value to restore when overlay closes
 let expandedMixTemp = { x: [], y: [] };
 let expandedTargetMixTemp = { x: [], y: [] };
-let expandedTopMax = 0;
 let expandedTargetTempMin = Infinity;
 let expandedTargetTempMax = -Infinity;
 let expandedTempMin = Infinity;
@@ -613,16 +614,11 @@ function resetExpandedData() {
     expandedMixTemp = { x: [], y: [] };
     expandedTargetMixTemp = { x: [], y: [] };
     expandedTopYMax = EXP_TOP_FLOOR;
-    expandedTopMax = 0;
     expandedTargetTempMin = Infinity;
     expandedTargetTempMax = -Infinity;
     expandedTempMin = Infinity;
     expandedTempMax = -Infinity;
     expandedLastGroupTemp = 90;
-}
-
-function includeExpandedTop(value) {
-    if (Number.isFinite(value)) expandedTopMax = Math.max(expandedTopMax, value);
 }
 
 function includeExpandedTemp(value) {
@@ -637,12 +633,7 @@ function includeExpandedTargetTemp(value) {
     expandedTargetTempMax = Math.max(expandedTargetTempMax, value);
 }
 
-function pushExpandedFrame(time, data, gflowY) {
-    includeExpandedTop(data.pressure);
-    includeExpandedTop(data.flow);
-    includeExpandedTop(data.targetPressure);
-    includeExpandedTop(data.targetFlow);
-    includeExpandedTop(gflowY);
+function pushExpandedFrame(time, data) {
     if (Number.isFinite(data.groupTemperature)) {
         expandedLastGroupTemp = data.groupTemperature;
         includeExpandedTemp(data.groupTemperature);
@@ -662,9 +653,6 @@ function pushExpandedFrame(time, data, gflowY) {
 
 function rebuildExpandedFromChartData(mixSeries = null, mixTargetSeries = null) {
     resetExpandedData();
-    for (const trace of [chartData.pressure, chartData.flow, chartData.targetPressure, chartData.targetFlow, chartData.weight]) {
-        for (const value of trace.y) includeExpandedTop(value);
-    }
     for (const value of chartData.groupTemperature.y) includeExpandedTemp(value * 10);
     if (chartData.groupTemperature.y.length) {
         expandedLastGroupTemp = chartData.groupTemperature.y.at(-1) * 10;
@@ -778,12 +766,44 @@ function expandedTempTraces() {
     return traces;
 }
 
+const expandedInteractionElements = new WeakSet();
+
+function expandedTopSeriesYs() {
+    return [
+        chartData.pressure.y,
+        chartData.flow.y,
+        chartData.weight.y,
+        chartData.targetPressure.y,
+        chartData.targetFlow.y
+    ];
+}
+
+function rescaleExpandedTop(element) {
+    if (!element?._fullLayout) return;
+    const visibility = element.data?.slice(0, 5).map(trace => trace.visible ?? true);
+    expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), 0);
+    void loadPlotly().then(Plotly => Plotly.relayout(element, { 'yaxis.range': [0, expandedTopYMax] }));
+}
+
+function ensureExpandedInteractions(element) {
+    if (element.id !== 'expanded-chart' || expandedInteractionElements.has(element) || typeof element.on !== 'function') return;
+    element.on('plotly_legendclick', event => {
+        const visibility = element.data.map(trace => trace.visible ?? true);
+        if (visibility[event.curveNumber] !== true || visibility.filter(value => value === true).length !== 1) return true;
+        void loadPlotly().then(Plotly => Plotly.restyle(element, 'visible', true));
+        return false;
+    });
+    element.on('plotly_restyle', () => rescaleExpandedTop(element));
+    expandedInteractionElements.add(element);
+}
+
 function renderExpandedCharts(mode = 'full') {
     if (!expandedOpen) return;
     const element = document.getElementById('expanded-chart');
     if (!element) return;
     const theme = currentTheme;
-    expandedTopYMax = computeExpandedTopYMax([[expandedTopMax]], expandedTopYMax);
+    const visibility = element.data?.slice(0, 5).map(trace => trace.visible ?? true);
+    expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), expandedTopYMax);
     const layout = expandedLayout(theme, [0, expandedTopYMax], expandedTemperatureRange());
     renderPlotly(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, EXPANDED_CHART_CONFIG, mode);
 }
@@ -950,7 +970,7 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
     pendingTime = time;
     isLiveShot = true;
     // Mirror this frame into the expanded (full-screen) charts, in real units.
-    pushExpandedFrame(time, data, weightY);
+    pushExpandedFrame(time, data);
     scheduleChartFlush();
 }
 
