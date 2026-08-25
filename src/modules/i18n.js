@@ -6,6 +6,8 @@ let translations = {};
 let keyIndex = {};
 let loadedLanguage = 'en';
 let translationCsvPromise = null;
+const TRANSLATION_CACHE_VERSION = 1;
+const TRANSLATION_CACHE_KEY = `translationDictionary:v${TRANSLATION_CACHE_VERSION}`;
 export const supportedLanguages = SUPPORTED_LANGUAGES;
 export let currentLanguage = 'en';
 
@@ -17,7 +19,7 @@ function clearTranslations() {
 
 function getTranslationCsv() {
     if (!translationCsvPromise) {
-        translationCsvPromise = fetch('src/ui/de1 gui translation - Sheet1.csv', { cache: 'no-cache' }).then(async response => {
+        translationCsvPromise = fetch('src/ui/de1 gui translation - Sheet1.csv').then(async response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -30,17 +32,55 @@ function getTranslationCsv() {
     return translationCsvPromise;
 }
 
+function getCachedTranslations(language) {
+    try {
+        const cached = JSON.parse(localStorage.getItem(TRANSLATION_CACHE_KEY));
+        if (cached?.language !== language || typeof cached.table !== 'object' || typeof cached.keyIndex !== 'object') return null;
+        return cached;
+    } catch (_) {
+        return null;
+    }
+}
+
+function cacheTranslations(language, parsed) {
+    try {
+        // Keep only the active language so the cache cannot grow once per language.
+        localStorage.setItem(TRANSLATION_CACHE_KEY, JSON.stringify({ language, ...parsed }));
+    } catch (_) {
+        // A full or restricted localStorage cache must not prevent translation.
+    }
+}
+
+function useTranslations(language, parsed) {
+    translations = parsed.table;
+    keyIndex = parsed.keyIndex;
+    loadedLanguage = language;
+}
+
 async function loadTranslations(language) {
     if (language === 'en') {
         clearTranslations();
         return;
     }
     if (loadedLanguage === language) return;
-    const parsed = parseTranslationColumn(await getTranslationCsv(), language);
-    translations = parsed.table;
-    keyIndex = parsed.keyIndex;
-    loadedLanguage = language;
+    const cached = getCachedTranslations(language);
+    const parsed = cached || parseTranslationColumn(await getTranslationCsv(), language);
+    useTranslations(language, parsed);
+    if (!cached) cacheTranslations(language, parsed);
     logger.info(`Translations loaded for language: ${language}`);
+}
+
+function loadCachedTranslations(language) {
+    if (language === 'en') {
+        clearTranslations();
+        return;
+    }
+    const cached = getCachedTranslations(language);
+    if (cached) useTranslations(language, cached);
+}
+
+function afterFirstPaint(callback) {
+    requestAnimationFrame(() => requestAnimationFrame(callback));
 }
 
 function findSupportedLanguage(language) {
@@ -261,18 +301,28 @@ export async function setLanguage(lang) {
 /**
  * Initializes the internationalization module.
  */
-export async function initI18n() {
-    // IDB is primary (survives WebView process kills on iOS/Android).
-    // localStorage is fallback for first run or when IDB hasn't been written yet.
-    let savedLang = null;
-    try {
-        await openDB();
-        savedLang = await getSetting('language');
-    } catch (_) {}
-    if (!savedLang) {
-        savedLang = localStorage.getItem('language');
-    }
-
+export function initI18n() {
+    // localStorage mirrors the durable setting so startup never waits for IDB.
+    const savedLang = localStorage.getItem('language');
     const initialLang = findSupportedLanguage(savedLang) || findSupportedLanguage(navigator.language) || 'en';
-    await setLanguage(initialLang);
+    currentLanguage = initialLang;
+    localStorage.setItem('language', initialLang);
+    loadCachedTranslations(initialLang);
+    translatePage();
+
+    afterFirstPaint(async () => {
+        let savedInIdb = null;
+        try {
+            await openDB();
+            savedInIdb = await getSetting('language');
+        } catch (_) {}
+
+        // Do not overwrite a preference the user changed while reconciliation ran.
+        const localNow = findSupportedLanguage(localStorage.getItem('language'));
+        const localChanged = localNow && localNow !== initialLang;
+        const reconciledLanguage = localChanged
+            ? localNow
+            : findSupportedLanguage(savedInIdb) || initialLang;
+        await setLanguage(reconciledLanguage);
+    });
 }

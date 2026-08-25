@@ -1,10 +1,12 @@
 {
   "name": "streamline-js",
   "version": "0.1.98",
-  "description": "A modern web UI skin for the Decent Espresso DE1, built on top of [Streamline-Bridge (reaprime)](https://github.com/tadelv/reaprime). This is a full rewrite of the original TCL-based Streamline skin into a browser-native web application — no framework, no bundler, just HTML/CSS/JS served as static files.",
+  "description": "A modern web UI skin for the Decent Espresso DE1, built on top of Streamline-Bridge (reaprime). Vanilla HTML/CSS/JS is served as static files, with a small build step for CSS and the modular ECharts asset.",
   "main": "index.js",
   "scripts": {
     "build:css": "tailwindcss -i ./src/input.css -o ./src/css/app.css --minify",
+    "build:echarts": "esbuild scripts/echarts-streamline-entry.js --bundle --format=esm --minify --outfile=src/modules/echarts-streamline.min.js",
+    "build": "npm run build:css && npm run build:echarts",
     "watch:css": "tailwindcss -i ./src/input.css -o ./src/css/app.css --watch",
     "test": "node --test"
   },
@@ -21,6 +23,8 @@
   "homepage": "https://github.com/decentespresso/streamline-js#readme",
   "devDependencies": {
     "daisyui": "^4.11.1",
+    "echarts": "6.1.0",
+    "esbuild": "0.25.9",
     "tailwindcss": "^3.4.19"
   }
 }

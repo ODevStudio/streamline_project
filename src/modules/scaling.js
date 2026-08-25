@@ -181,24 +181,18 @@ export function initScaling() {
         }));
     }
 
-    // Initial scaling with a slight delay to ensure the browser has settled the viewport dimensions
-    // This is especially important for web views that might adjust dimensions after initial load
-    setTimeout(() => {
-        updateScale();
-        
-        // Double-check scaling after a bit more time to handle edge cases where the viewport
-        // dimensions might still be adjusting (especially in fullscreen web views)
-        setTimeout(() => {
-            updateScale();
-            // Reveal content after initial scaling is complete
-            if (content && !isInitialScaleDone) {
-                isInitialScaleDone = true;
-                requestAnimationFrame(() => {
-                    content.classList.add('scaled');
-                });
-            }
-        }, 300);
-    }, 100);
+    updateScale();
+
+    if (content && !isInitialScaleDone) {
+        isInitialScaleDone = true;
+        requestAnimationFrame(() => {
+            content.classList.add('scaled');
+        });
+    }
+
+    // Correct a WebView whose viewport settles late, but never hide the UI
+    // while waiting for the correction.
+    setTimeout(updateScale, 250);
     
     // Add resize listener with debounce to prevent excessive recalculations
     let resizeTimer;

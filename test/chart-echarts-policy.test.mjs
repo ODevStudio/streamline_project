@@ -5,19 +5,37 @@ import { test } from 'node:test';
 const root = new URL('../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 
-test('Apache ECharts is local and the other chart engines are absent', () => {
+test('the modular Apache ECharts build is local and lazily loaded', () => {
     const index = read('index.html');
-    const asset = new URL('src/modules/echarts-6.1.0.min.js', root);
-    assert.match(index, /src\/modules\/echarts-6\.1\.0\.min\.js/);
+    const asset = new URL('src/modules/echarts-streamline.min.js', root);
+    const loader = read('src/modules/echarts-loader.js');
+    assert.doesNotMatch(index, /<script[^>]+echarts/i);
+    assert.match(loader, /requestAnimationFrame/);
+    assert.match(loader, /import\('\.\/echarts-streamline\.min\.js'\)/);
     assert.doesNotMatch(index, /<script[^>]+(?:plotly|uPlot)/i);
     assert.equal(existsSync(new URL('src/modules/plotly-3.1.0.min.js', root)), false);
     assert.equal(existsSync(new URL('src/modules/uPlot.iife.min.js', root)), false);
-    assert.equal(statSync(asset).size, 1_121_883);
+    assert.ok(statSync(asset).size < 1_121_883);
+});
+
+test('the ECharts entry registers only the renderer features Streamline uses', () => {
+    const entry = read('scripts/echarts-streamline-entry.js');
+    for (const feature of ['LineChart', 'GridComponent', 'LegendComponent', 'TooltipComponent',
+        'AxisPointerComponent', 'MarkLineComponent', 'MarkPointComponent', 'CanvasRenderer']) {
+        assert.match(entry, new RegExp(`\\b${feature}\\b`));
+    }
+    assert.match(entry, /window\.echarts = echarts/);
+});
+
+test('the modular ECharts namespace retains the live-point color utility', async () => {
+    const echarts = await import('echarts/core');
+    assert.equal(typeof echarts.color?.lift, 'function');
 });
 
 test('ECharts renderer uses Canvas, line series, collision-safe labels, and step markers', () => {
     const renderer = read('src/modules/echarts-renderer.js');
     assert.match(renderer, /renderer: 'canvas'/);
+    assert.match(renderer, /if \(!window\.echarts\) return/);
     assert.match(renderer, /type: 'line'/);
     assert.match(renderer, /sampling: 'lttb'/);
     assert.match(renderer, /function annotationPositions/);

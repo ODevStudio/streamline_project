@@ -1,4 +1,4 @@
-/* Scaling container - initially hidden until scaled */
+/* Scaling container */
 #scaling-container {
     overflow: hidden;
 }
@@ -7,8 +7,6 @@
     width: 1920px;
     height: 1200px;
     visibility: hidden;
-    opacity: 0;
-    transition: opacity 0.15s ease-out;
 }
 
 #subpage-host {
@@ -135,7 +133,6 @@
 
 #scaled-content.scaled {
     visibility: visible;
-    opacity: 1;
 }
 @font-face { font-family: 'Inter'; src: url('../ui/Inter-Thin.woff2') format('woff2'); font-weight: 100; font-display: swap; }
 @font-face { font-family: 'Inter'; src: url('../ui/Inter-ExtraLight.woff2') format('woff2'); font-weight: 200; font-display: swap; }

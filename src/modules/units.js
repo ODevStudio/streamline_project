@@ -6,6 +6,10 @@ import { openDB, getSetting, setSetting } from './idb.js';
 const TEMP_UNIT_KEY = 'tempUnit';
 let currentTempUnit = 'C';
 
+function afterFirstPaint(callback) {
+    requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
 export function celsiusToFahrenheit(c) {
     return (c * 9 / 5) + 32;
 }
@@ -77,13 +81,33 @@ export function boundToDisplay(celsius) {
     return Math.round(currentTempUnit === 'F' ? celsiusToFahrenheit(celsius) : celsius);
 }
 
-export async function initUnits() {
-    let saved = null;
-    try {
-        await openDB();
-        saved = await getSetting(TEMP_UNIT_KEY);
-    } catch (_) {}
-    if (!saved) saved = localStorage.getItem(TEMP_UNIT_KEY);
-    currentTempUnit = saved === 'F' ? 'F' : 'C';
+export function initUnits() {
+    const saved = localStorage.getItem(TEMP_UNIT_KEY);
+    const initialUnit = saved === 'F' ? 'F' : 'C';
+    currentTempUnit = initialUnit;
     localStorage.setItem(TEMP_UNIT_KEY, currentTempUnit);
+
+    afterFirstPaint(async () => {
+        let savedInIdb = null;
+        try {
+            await openDB();
+            savedInIdb = await getSetting(TEMP_UNIT_KEY);
+        } catch (_) {}
+
+        // Do not overwrite a preference the user changed while reconciliation ran.
+        const localNow = localStorage.getItem(TEMP_UNIT_KEY);
+        const normalizedLocal = localNow === 'F' ? 'F' : 'C';
+        const localChanged = normalizedLocal !== initialUnit;
+        const validIdbUnit = savedInIdb === 'C' || savedInIdb === 'F';
+        const reconciledUnit = localChanged
+            ? normalizedLocal
+            : (validIdbUnit ? savedInIdb : initialUnit);
+
+        if (reconciledUnit !== currentTempUnit) {
+            currentTempUnit = reconciledUnit;
+            localStorage.setItem(TEMP_UNIT_KEY, currentTempUnit);
+            document.dispatchEvent(new CustomEvent('streamline:unitchange', { detail: { unit: currentTempUnit } }));
+        }
+        setSetting(TEMP_UNIT_KEY, currentTempUnit).catch(() => {});
+    });
 }

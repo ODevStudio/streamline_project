@@ -182,6 +182,10 @@ function chartOption(traces, layout, interactive, size) {
 }
 
 export function renderChart(element, traces, layout, interactive = false) {
+    // Theme/bootstrap work can reach the renderer before the deferred vendor
+    // promise resolves (and on direct Settings it never resolves by design).
+    if (!window.echarts) return;
+
     const size = dimensions(element);
     let state = charts.get(element);
     element.style.background = layout.paper_bgcolor || layout.plot_bgcolor || 'transparent';

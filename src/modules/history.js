@@ -22,27 +22,27 @@ let totalAvailable = 0;
 // profile selector left on the shared chart element).
 let paintedShotId = null;
 
-// Paints whatever the newest shot in the local IDB cache is, instantly --
-// an indexed cursor read, no network wait. May be stale (a shot pulled since
-// this cache was last written won't be here yet); paintNewestShotFast()
-// below confirms/corrects it against the network moments later.
-async function paintFromCacheFast() {
+// Reads whatever the newest shot in the local IDB cache is, without waiting
+// for ECharts. Startup races this read with the lazy bundle request and paints
+// only after both are ready.
+async function readFromCacheFast() {
     try {
-        const cached = await getLatestCachedShot();
-        if (cached?.measurements) {
-            chart.plotHistoricalShot(cached.measurements, cached.workflow);
-            paintedShotId = cached.id;
-            return cached;
-        }
+        return await getLatestCachedShot();
     } catch (error) {
-        logger.warn('Cache-first shot paint failed:', error);
+        logger.warn('Cache-first shot read failed:', error);
     }
     return null;
 }
 
+function paintCachedShot(cached) {
+    if (!cached?.measurements) return;
+    chart.plotHistoricalShot(cached.measurements, cached.workflow);
+    paintedShotId = cached.id;
+}
+
 // Confirms/corrects the newest shot against the network: /shots/latest
 // (cheap, no measurements) tells us the real newest id. If it matches what
-// paintFromCacheFast() already painted, cache was current -- no further
+// the cache-first paint already drew, cache was current -- no further
 // fetch or redraw needed. Otherwise fetches /shots/{id} for the full record
 // and draws it. Runs in parallel with loadShotHistory()'s slower 20-item
 // list + IDB sync in initHistory(), so the chart isn't gated behind fetching
@@ -328,7 +328,7 @@ function setupHistoryLongPress() {
     });
 }
 
-export async function initHistory() {
+export async function initHistory(echartsReady = Promise.resolve()) {
     try {
         await openDB();
     } catch (error) {
@@ -358,11 +358,13 @@ export async function initHistory() {
         }
     };
 
-    // Paint instantly from whatever's cached locally, then confirm/correct it
-    // against the network in parallel with the slower list+IDB sync below --
-    // the chart no longer waits on caching 20 shots it doesn't need yet just
-    // to show shot #0.
-    const cachedShot = await paintFromCacheFast();
+    // The bundle starts after the shell's first animation frame. This indexed
+    // cache read runs in parallel; the first chart paint waits for both only.
+    const [cachedShot] = await Promise.all([
+        readFromCacheFast(),
+        echartsReady
+    ]);
+    paintCachedShot(cachedShot);
     const fastPaintPromise = paintNewestShotFast(cachedShot?.id, cachedShot);
 
     await loadShotHistory();

@@ -25,6 +25,10 @@ export function isSubPage() {
     return getPageUrlFromQuery() !== null;
 }
 
+export function isSettingsRoute() {
+    return getPageUrlFromQuery()?.includes('settings.html') ?? false;
+}
+
 export async function initRouter() {
     const pageUrl = getPageUrlFromQuery();
     if (pageUrl) {
@@ -77,13 +81,19 @@ function showMainPage() {
 
     window.history.pushState({ pageUrl: null }, 'Streamline', '?page=index');
 
+    // A direct Settings boot has not requested ECharts yet. Returning to the
+    // dashboard starts the same deferred loader used at normal startup.
+    const chartReady = Promise.resolve(window.app?.echartsReady?.());
+
     // The profile selector shares the `plotly-chart` id and leaves its last
     // plotted profile curve on the element — blank it immediately so that
     // curve doesn't sit on screen for the duration of the async history
     // repaint below. Skipped during a live shot; the websocket is already
     // driving the chart and a blank flash would just fight it.
     if (!window.app?.isShotActive?.()) {
-        window.app?.clearChart?.();
+        chartReady
+            .then(() => window.app?.clearChart?.())
+            .catch(e => console.error('chart clear error:', e));
     }
 
     // Ensure main-page data init has run — booting on a sub-page URL skips it,
@@ -102,6 +112,7 @@ function showMainPage() {
     // chart) — independent of the rest of initMainPageOnce above.
     if (!window.app?.isShotActive?.()) {
         window.app?.historyReady?.()
+            .then(() => chartReady)
             .then(() => import('./history.js').then(m => m.refreshCurrentShot?.()))
             .catch(e => console.error('history repaint error:', e));
     }
@@ -155,6 +166,7 @@ export async function loadPage(pageUrl) {
 
         if (pageUrl.includes('profile_selector.html')) {
             try {
+                await window.app?.echartsReady?.();
                 const { initializeProfileSelector } = await import('./profile_selector.js');
                 if (initializeProfileSelector) {
                     initializeProfileSelector().catch(e => console.error('Router: Profile selector init error:', e));
@@ -164,6 +176,7 @@ export async function loadPage(pageUrl) {
             }
         } else if (pageUrl.includes('profile_editor.html')) {
             try {
+                await window.app?.echartsReady?.();
                 const { initializeProfileEditor } = await import('./profile_editor.js');
                 if (initializeProfileEditor) await initializeProfileEditor();
             } catch (e) {

@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Build modular ECharts asset
+        run: |
+          npm ci
+          npm run build:echarts
+
       - name: Sync translations from Google Sheets
         env:
           TRANSLATIONS_URL: ${{ secrets.TRANSLATIONS_SHEET_URL }}

@@ -8,7 +8,8 @@ import * as history from './history.js';
 import * as shotData from './shotData.js';
 import * as profileManager from './profileManager.js';
 import * as api from './api.js';
-import { loadPage, initRouter, isSubPage } from './router.js';
+import { loadPage, initRouter, isSubPage, isSettingsRoute } from './router.js';
+import { loadEChartsAfterFirstFrame } from './echarts-loader.js';
 import { initWaterTankSocket, isTankBelowRefillLevel } from './waterTank.js';
 import { logger, setDebug } from './logger.js';
 import { deriveScreensaverAction, isMachineAsleep, isScreensaverSuppressed } from './screensaver-policy.js';
@@ -26,6 +27,7 @@ import { openContextMenu } from './context-menu.js';
 import { shouldHandleMachineShortcut } from './machine-shortcut.js';
 
 window.app = { api, ui, chart };
+window.app.echartsReady = loadEChartsAfterFirstFrame;
 
 // Export functions for UI and router access
 window.handleWeightClick = handleWeightClick;
@@ -1803,7 +1805,7 @@ async function initMainPageOnce() {
     if (mainPageInitPromise) return mainPageInitPromise;
     mainPageInitPromise = (async () => {
         logger.info('initMainPageOnce: starting.');
-        await history.initHistory();
+        await history.initHistory(loadEChartsAfterFirstFrame());
         resolveHistoryReady();
         await profileManager.init();
         window.app.saveGrindToActiveProfile = (val) => profileManager.saveGrindToActiveProfile(val);
@@ -1966,14 +1968,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         setDebug(true);
         logger.info('App DOMContentLoaded: Starting initialization.');
 
+        // Size and reveal the design canvas before any storage or translation work.
+        initScaling();
+
         chart.initChart();
         wireExpandedChart();
         logger.info('App DOMContentLoaded: Chart initialized.');
 
-        await initI18n();
-        await initUnits();
+        // Direct Settings boots never request ECharts. Every chart-bearing route
+        // shares this memoized promise, whose import starts after the first frame.
+        if (!isSettingsRoute()) loadEChartsAfterFirstFrame();
+
+        // Both modules apply their localStorage mirrors synchronously, then reconcile
+        // IndexedDB (and uncached translations) after the first paint.
+        initI18n();
+        initUnits();
         ui.initUI({ onWeightClick: handleWeightClick }); // also inits the screensaver
-        initScaling();
         initNumpadModal();
         initTimePicker();
         initMobileValueInputs();
