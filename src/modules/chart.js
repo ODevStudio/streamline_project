@@ -28,30 +28,60 @@ const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot:
 const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: false };
 const renderedTraceCounts = new WeakMap();
 const renderQueues = new WeakMap();
+const requestedFullRenderRevisions = new WeakMap();
+const appliedFullRenderRevisions = new WeakMap();
+let fullRenderRevision = 0;
 let latestMainRender = null;
 let mainRenderDirty = false;
+let currentTheme = localStorage.getItem('theme') || 'light';
 
-async function drawPlotly({ element, traces, layout, config }) {
+function getLiveLayoutUpdate(layout) {
+    return {
+        'xaxis.autorange': layout.xaxis?.autorange,
+        ...(layout.xaxis?.range ? { 'xaxis.range': layout.xaxis.range } : {}),
+        ...(layout.xaxis?.dtick !== undefined ? { 'xaxis.dtick': layout.xaxis.dtick } : {}),
+        'yaxis.range': layout.yaxis?.range,
+        shapes: layout.shapes || [],
+        annotations: layout.annotations || []
+    };
+}
+
+async function drawPlotly({ element, traces, layout, config, mode }) {
+    const requestedFullRevision = requestedFullRenderRevisions.get(element) || 0;
+    const effectiveMode = mode !== 'live' || requestedFullRevision > (appliedFullRenderRevisions.get(element) || 0)
+        ? 'full'
+        : 'live';
     const traceCount = renderedTraceCounts.get(element);
     if (traceCount !== traces.length) {
         await Plotly.react(element, traces, layout, config);
         renderedTraceCounts.set(element, traces.length);
+        appliedFullRenderRevisions.set(element, requestedFullRevision);
         return;
     }
 
-    await Plotly.update(element, {
-        x: traces.map((trace) => trace.x),
-        y: traces.map((trace) => trace.y),
+    const x = traces.map((trace) => trace.x);
+    const y = traces.map((trace) => trace.y);
+    const dataUpdate = effectiveMode === 'live' ? { x, y } : {
+        x,
+        y,
         name: traces.map((trace) => trace.name),
         mode: traces.map((trace) => trace.mode || 'lines'),
         hoverinfo: traces.map((trace) => trace.hoverinfo || 'name'),
         'line.color': traces.map((trace) => trace.line?.color),
         'line.dash': traces.map((trace) => trace.line?.dash || 'solid'),
         'line.width': traces.map((trace) => trace.line?.width || 2)
-    }, layout, traces.map((_, index) => index));
+    };
+    await Plotly.update(
+        element,
+        dataUpdate,
+        effectiveMode === 'live' ? getLiveLayoutUpdate(layout) : layout,
+        traces.map((_, index) => index)
+    );
+    if (effectiveMode !== 'live') appliedFullRenderRevisions.set(element, requestedFullRevision);
 }
 
-function renderPlotly(element, traces, layout, config) {
+function renderPlotly(element, traces, layout, config, mode = 'full') {
+    if (mode !== 'live') requestedFullRenderRevisions.set(element, ++fullRenderRevision);
     let enqueue = renderQueues.get(element);
     if (!enqueue) {
         enqueue = createLatestTaskRunner(drawPlotly, (error) => {
@@ -60,23 +90,23 @@ function renderPlotly(element, traces, layout, config) {
         });
         renderQueues.set(element, enqueue);
     }
-    enqueue({ element, traces, layout, config });
+    enqueue({ element, traces, layout, config, mode });
 }
 
-function renderMain(traces, layout) {
-    latestMainRender = { traces, layout };
+function renderMain(traces, layout, mode = 'full') {
+    latestMainRender = { traces, layout, mode };
     const element = getChartElement();
     if (!element || element.offsetParent === null || expandedOpen) {
         mainRenderDirty = true;
         return;
     }
-    renderPlotly(element, traces, layout, MAIN_CHART_CONFIG);
+    renderPlotly(element, traces, layout, MAIN_CHART_CONFIG, mode);
     mainRenderDirty = false;
 }
 
 function flushMainRender() {
     if (mainRenderDirty && latestMainRender && !expandedOpen) {
-        renderMain(latestMainRender.traces, latestMainRender.layout);
+        renderMain(latestMainRender.traces, latestMainRender.layout, latestMainRender.mode);
     }
 }
 
@@ -168,6 +198,7 @@ const baseChartData = {
 
 // Create chartData with initial values
 const chartData = JSON.parse(JSON.stringify(baseChartData));
+const chartTraces = Object.values(chartData);
 
 // ============================================================================
 // Expanded (full-screen) live charts.
@@ -283,31 +314,32 @@ const LABEL_X_GAP = 6;     // px between line end and label text
 const LABEL_X_PAD = 10;    // px breathing room past the widest label
 
 let _measureCanvasCtx = null;
+const measuredLabelWidths = new Map();
 function measureTextWidth(text) {
+    if (measuredLabelWidths.has(text)) return measuredLabelWidths.get(text);
     if (!_measureCanvasCtx) {
         const canvas = document.createElement('canvas');
         _measureCanvasCtx = canvas.getContext('2d');
     }
     _measureCanvasCtx.font = LABEL_FONT_CSS;
-    return _measureCanvasCtx.measureText(text).width;
+    const width = _measureCanvasCtx.measureText(text).width;
+    measuredLabelWidths.set(text, width);
+    return width;
 }
 
 // Plot pixel width (between left and right margin). Falls back to a sensible
 // default when the chart element is hidden or hasn't been measured yet —
 // returning a tiny value here would blow up `rangeMaxForLabels`.
 const DEFAULT_PLOT_PX_WIDTH = 1360; // baseline 1460 chart - margin.l(50) - margin.r(50)
+let observedChartSize = { width: 0, height: 0 };
 function getPlotPixelWidth() {
-    const element = getChartElement();
-    const cssWidth = element ? element.clientWidth : 0;
-    const usable = cssWidth - 100; // baseLayout margin.l + margin.r
+    const usable = observedChartSize.width - 100; // baseLayout margin.l + margin.r
     return usable > 200 ? usable : DEFAULT_PLOT_PX_WIDTH;
 }
 
 const DEFAULT_PLOT_PX_HEIGHT = 590; // baseline 650 chart - margin.t(20) - margin.b(40)
 function getPlotPixelHeight() {
-    const element = getChartElement();
-    const cssHeight = element ? element.clientHeight : 0;
-    const usable = cssHeight - 60;
+    const usable = observedChartSize.height - 60;
     return usable > 100 ? usable : DEFAULT_PLOT_PX_HEIGHT;
 }
 
@@ -363,7 +395,7 @@ function rangeMaxForLabels(dataMax, rangeMin = 0) {
 }
 
 function getAnnotations() {
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const annotations = [];
 
     for (const traceName in chartData) {
@@ -407,11 +439,13 @@ let isLiveShot = false;
 // Call when a shot finishes to reveal the trace-end labels on the chart that
 // was just live.
 export function finalizeLiveChart() {
+    cancelChartFlush();
+    liveRenderDirty = false;
     isLiveShot = false;
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layout);
-    renderMain(Object.values(chartData), layout);
+    renderMain(chartTraces, layout);
 }
 
 // Re-measure labels and refresh annotations + x-range so labels stay inside
@@ -434,18 +468,18 @@ export function refreshLabelMargin() {
         const lastX = trace.x[trace.x.length - 1];
         if (lastX > dataMax) dataMax = lastX;
     }
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layout);
     if (dataMax === 0) {
         layout.xaxis = { ...layout.xaxis, autorange: true };
-        renderMain(Object.values(chartData), layout);
+        renderMain(chartTraces, layout);
         return;
     }
 
     const rangeMax = rangeMaxForLabels(dataMax);
     layout.xaxis = { ...layout.xaxis, range: [0, rangeMax], autorange: false };
-    renderMain(Object.values(chartData), layout);
+    renderMain(chartTraces, layout);
     appliedRangeMax = rangeMax;
 }
 
@@ -479,7 +513,9 @@ let liveProfileFrame = -1; // Track current profileFrame for live data
 
 let pendingTime = 0;
 let redrawTimer = 0;
+let redrawFrame = 0;
 let lastRedrawAt = 0;
+let liveRenderDirty = false;
 
 function dtickForTime(time) {
     if (time < 15) return 1;
@@ -494,16 +530,13 @@ function dtickForTime(time) {
 let appliedRangeMax = null; // last applied range end
 
 function flushChart() {
-    redrawTimer = 0;
-    const now = performance.now();
-    const remaining = CHART_REDRAW_INTERVAL_MS - (now - lastRedrawAt);
-    if (remaining > 0) {
-        redrawTimer = setTimeout(flushChart, remaining);
+    if (!hasVisibleChart()) {
+        liveRenderDirty = true;
         return;
     }
-    lastRedrawAt = now;
+    lastRedrawAt = performance.now();
 
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const dtickValue = dtickForTime(pendingTime);
     const rangeMax = rangeMaxForLabels(pendingTime);
     const layout = theme === 'dark' ? darkLayout : lightLayout;
@@ -515,14 +548,44 @@ function flushChart() {
         autorange: false,
         dtick: dtickValue
     };
-    renderMain(Object.values(chartData), layout);
+    renderMain(chartTraces, layout, 'live');
     appliedRangeMax = rangeMax;
-    if (expandedOpen) renderExpandedCharts();
+    if (expandedOpen) renderExpandedCharts('live');
+    liveRenderDirty = false;
+}
+
+function hasVisibleChart() {
+    if (document.visibilityState === 'hidden') return false;
+    if (expandedOpen) return true;
+    const element = getChartElement();
+    return Boolean(element && element.offsetParent !== null);
+}
+
+function cancelChartFlush() {
+    if (redrawTimer) clearTimeout(redrawTimer);
+    if (redrawFrame) cancelAnimationFrame(redrawFrame);
+    redrawTimer = 0;
+    redrawFrame = 0;
 }
 
 function scheduleChartFlush() {
-    if (redrawTimer) return;
-    redrawTimer = setTimeout(flushChart, Math.max(0, CHART_REDRAW_INTERVAL_MS - (performance.now() - lastRedrawAt)));
+    if (!hasVisibleChart()) {
+        liveRenderDirty = true;
+        return;
+    }
+    if (redrawTimer || redrawFrame) return;
+    redrawTimer = setTimeout(() => {
+        redrawTimer = 0;
+        redrawFrame = requestAnimationFrame(() => {
+            redrawFrame = 0;
+            flushChart();
+        });
+    }, Math.max(0, CHART_REDRAW_INTERVAL_MS - (performance.now() - lastRedrawAt)));
+}
+
+function flushDeferredChart() {
+    if (liveRenderDirty) scheduleChartFlush();
+    else flushMainRender();
 }
 
 // ---- Expanded (full-screen) charts -----------------------------------------
@@ -700,12 +763,12 @@ function expandedTempTraces() {
     return traces;
 }
 
-function renderExpandedCharts() {
+function renderExpandedCharts(mode = 'full') {
     if (!expandedOpen) return;
     const topEl = document.getElementById('expanded-flow-chart');
     const tempEl = document.getElementById('expanded-temp-chart');
     if (!topEl || !tempEl) return;
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     expandedTopYMax = computeExpandedTopYMax(
         [expandedSeries.pressure.y, expandedSeries.flow.y, expandedSeries.targetPressure.y,
          expandedSeries.targetFlow.y, expandedSeries.gflow.y],
@@ -715,8 +778,8 @@ function renderExpandedCharts() {
     const tempLayout = expandedLayout(theme,
         computeExpandedTempRange(expandedSeries.targetTemp.y, expandedSeries.groupTemp.y,
                                  expandedSeries.mixTemp.y, expandedSeries.targetMixTemp.y), true);
-    renderPlotly(topEl, expandedTopTraces(), topLayout, EXPANDED_CHART_CONFIG);
-    renderPlotly(tempEl, expandedTempTraces(), tempLayout, EXPANDED_CHART_CONFIG);
+    renderPlotly(topEl, expandedTopTraces(), topLayout, EXPANDED_CHART_CONFIG, mode);
+    renderPlotly(tempEl, expandedTempTraces(), tempLayout, EXPANDED_CHART_CONFIG, mode);
 }
 
 export function isExpandedChartOpen() { return expandedOpen; }
@@ -811,7 +874,7 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
     }
 
     const time = (new Date(data.timestamp) - shotStartTime) / 1000;
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     let stepMarkerAdded = false;
 
     // New logic: Add vertical line and annotation at the start of each step based on profileFrame
@@ -888,6 +951,7 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
     lastTargetFlowY = targetFlowY;
 
     pendingTime = time;
+    isLiveShot = true;
     // Mirror this frame into the expanded (full-screen) charts, in real units.
     pushExpandedFrame(time, data, weightY);
     scheduleChartFlush();
@@ -915,8 +979,9 @@ function resetChartState() {
 
     // Cancel a queued flush so a stale draw from the previous shot can't land
     // on the freshly cleared chart.
-    if (redrawTimer) { clearTimeout(redrawTimer); redrawTimer = 0; }
+    cancelChartFlush();
     lastRedrawAt = 0;
+    liveRenderDirty = false;
     appliedRangeMax = null;
     isLiveShot = false;
     resetExpandedData();
@@ -932,7 +997,7 @@ function resetChartState() {
 export function clearChart() {
     resetChartState();
 
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
 
     const element = getChartElement();
@@ -942,7 +1007,7 @@ export function clearChart() {
     }
     applyLabelLayout(layout);
     layout.xaxis = { ...layout.xaxis, autorange: true };
-    renderMain(Object.values(chartData), layout);
+    renderMain(chartTraces, layout);
     if (expandedOpen) renderExpandedCharts();
 }
 
@@ -1023,7 +1088,7 @@ export function plotHistoricalShot(measurements, workflow = null) {
     // If workflow is provided, use step exit conditions for vertical lines
     if (workflow && workflow.profile && workflow.profile.steps) {
         const steps = workflow.profile.steps;
-        const theme = localStorage.getItem('theme') || 'light';
+        const theme = currentTheme;
         const layout = theme === 'dark' ? darkLayout : lightLayout;
 
         for (const dataPoint of measurements) {
@@ -1199,7 +1264,7 @@ export function plotHistoricalShot(measurements, workflow = null) {
         dtickValue = 30;
     }
 
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layout);
 
@@ -1219,7 +1284,7 @@ export function plotHistoricalShot(measurements, workflow = null) {
     } else {
         layout.xaxis = { ...layout.xaxis, autorange: true, dtick: dtickValue };
     }
-    renderMain(Object.values(chartData), layout);
+    renderMain(chartTraces, layout);
 }
 
 // Helper function to check if exit condition is met
@@ -1336,7 +1401,7 @@ export function plotProfile(profile) {
         currentTime = nextTime;
     }
 
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     const layout = JSON.parse(JSON.stringify(theme === 'dark' ? darkLayout : lightLayout));
     layout.annotations = [];
     layout.shapes = []; // Clear shapes for profile plot
@@ -1357,7 +1422,7 @@ export function plotProfile(profile) {
 
     // Sparser Y-axis ticks (0, 2, 4, 6, 8, 10) instead of every 1 unit
     layout.yaxis.dtick = 2;
-    const plotData = JSON.parse(JSON.stringify(Object.values(chartData)));
+    const plotData = JSON.parse(JSON.stringify(chartTraces));
 
     const targetPressureTrace = plotData.find(trace => trace.name === 'Target Pressure');
     if (targetPressureTrace) {
@@ -1422,7 +1487,9 @@ function handleChartWindowResize() {
     chartWindowResizeTimeout = setTimeout(() => resizeChartElement(getChartElement()), 100);
 }
 
-function handleChartElementResize() {
+function handleChartElementResize(entries) {
+    const size = entries[0]?.contentRect;
+    if (size) observedChartSize = { width: size.width, height: size.height };
     clearTimeout(chartElementResizeTimeout);
     chartElementResizeTimeout = setTimeout(() => resizeChartElement(observedChartElement), 100);
 }
@@ -1432,8 +1499,13 @@ function handleChartStorage(event) {
 }
 
 function handleChartLanguageChange() {
+    measuredLabelWidths.clear();
     refreshLabelMargin();
     if (expandedOpen) renderExpandedCharts();
+}
+
+function handleChartVisibilityChange() {
+    if (document.visibilityState === 'visible') flushDeferredChart();
 }
 
 function ensureChartLifecycle() {
@@ -1441,7 +1513,8 @@ function ensureChartLifecycle() {
         window.addEventListener('resize', handleChartWindowResize);
         window.addEventListener('storage', handleChartStorage);
         document.addEventListener('streamline:languagechange', handleChartLanguageChange);
-        document.addEventListener('streamline:mainpagevisible', flushMainRender);
+        document.addEventListener('streamline:mainpagevisible', flushDeferredChart);
+        document.addEventListener('visibilitychange', handleChartVisibilityChange);
         chartLifecycleBound = true;
     }
     if (!chartResizeObserver && window.ResizeObserver) {
@@ -1453,6 +1526,7 @@ function observeChartElement(element) {
     if (!chartResizeObserver || observedChartElement === element) return;
     if (observedChartElement) chartResizeObserver.unobserve(observedChartElement);
     observedChartElement = element;
+    observedChartSize = { width: element.clientWidth, height: element.clientHeight };
     chartResizeObserver.observe(element);
 }
 
@@ -1469,7 +1543,8 @@ export function initChart() {
     console.log('initChart: chartElement visibility:', window.getComputedStyle ? window.getComputedStyle(element).visibility : 'unknown');
     console.log('initChart: chartElement display:', window.getComputedStyle ? window.getComputedStyle(element).display : 'unknown');
 
-    const theme = localStorage.getItem('theme') || 'light';
+    currentTheme = localStorage.getItem('theme') || 'light';
+    const theme = currentTheme;
     updateChartColors(theme); // Apply theme-specific colors
 
     const layout = theme === 'dark' ? darkLayout : lightLayout;
@@ -1489,11 +1564,12 @@ export function initChart() {
 }
 
 export function setTheme(theme) {
+    currentTheme = theme;
     updateChartColors(theme); // Apply theme-specific colors
 
     const layoutUpdate = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layoutUpdate);
-    const data = Object.values(chartData);
+    const data = chartTraces;
     const element = getChartElement();
     if (!element) {
         console.error('setTheme: chartElement not found in DOM');
