@@ -38,3 +38,22 @@ test('latest task runner continues after a failed task', async () => {
 
     assert.deepEqual(errors, ['failed']);
 });
+
+test('disposing drops pending work and waits for the active task', async () => {
+    let calls = [];
+    let release;
+    const active = new Promise(resolve => { release = resolve; });
+    const enqueue = createLatestTaskRunner(async value => {
+        calls = [...calls, value];
+        if (value === 'first') await active;
+    }, assert.fail);
+
+    enqueue('first');
+    enqueue('second');
+    const disposed = enqueue.dispose();
+    enqueue('third');
+    release();
+    await disposed;
+
+    assert.deepEqual(calls, ['first']);
+});

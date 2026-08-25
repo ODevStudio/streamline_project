@@ -28,6 +28,7 @@ const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot:
 const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: false };
 const renderedTraceCounts = new WeakMap();
 const renderQueues = new WeakMap();
+const renderGenerations = new WeakMap();
 const requestedFullRenderRevisions = new WeakMap();
 const appliedFullRenderRevisions = new WeakMap();
 let fullRenderRevision = 0;
@@ -50,7 +51,8 @@ function getLiveLayoutUpdate(layout) {
     };
 }
 
-async function drawPlotly({ element, traces, layout, config, mode }) {
+async function drawPlotly({ element, traces, layout, config, mode, generation }) {
+    if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     const requestedFullRevision = requestedFullRenderRevisions.get(element) || 0;
     const effectiveMode = mode !== 'live' || requestedFullRevision > (appliedFullRenderRevisions.get(element) || 0)
         ? 'full'
@@ -58,6 +60,7 @@ async function drawPlotly({ element, traces, layout, config, mode }) {
     const traceCount = renderedTraceCounts.get(element);
     if (traceCount !== traces.length) {
         await Plotly.react(element, traces, layout, config);
+        if (!element.isConnected || renderGenerations.get(element) !== generation) return;
         renderedTraceCounts.set(element, traces.length);
         appliedFullRenderRevisions.set(element, requestedFullRevision);
         return;
@@ -81,6 +84,7 @@ async function drawPlotly({ element, traces, layout, config, mode }) {
         effectiveMode === 'live' ? getLiveLayoutUpdate(layout) : layout,
         traces.map((_, index) => index)
     );
+    if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     if (effectiveMode !== 'live') appliedFullRenderRevisions.set(element, requestedFullRevision);
 }
 
@@ -88,13 +92,31 @@ function renderPlotly(element, traces, layout, config, mode = 'full') {
     if (mode !== 'live') requestedFullRenderRevisions.set(element, ++fullRenderRevision);
     let enqueue = renderQueues.get(element);
     if (!enqueue) {
+        renderGenerations.set(element, (renderGenerations.get(element) || 0) + 1);
         enqueue = createLatestTaskRunner(drawPlotly, (error) => {
             renderedTraceCounts.delete(element);
             logger.error('Chart render failed:', error);
         });
         renderQueues.set(element, enqueue);
     }
-    enqueue({ element, traces, layout, config, mode });
+    enqueue({ element, traces, layout, config, mode, generation: renderGenerations.get(element) });
+}
+
+async function disposePlotly(element) {
+    const generation = (renderGenerations.get(element) || 0) + 1;
+    renderGenerations.set(element, generation);
+    const enqueue = renderQueues.get(element);
+    renderQueues.delete(element);
+    await enqueue?.dispose();
+    if (renderGenerations.get(element) !== generation) return;
+    try {
+        if (window.Plotly) Plotly.purge(element);
+    } finally {
+        renderedTraceCounts.delete(element);
+        requestedFullRenderRevisions.delete(element);
+        appliedFullRenderRevisions.delete(element);
+        renderGenerations.delete(element);
+    }
 }
 
 function renderMain(traces, layout, mode = 'full') {
@@ -791,9 +813,7 @@ export function closeExpandedChart() {
     const help = document.getElementById('help-overlay-btn');
     if (help) help.style.display = helpBtnPrevDisplay;
     const element = document.getElementById('expanded-chart');
-    try {
-        if (element) { Plotly.purge(element); renderedTraceCounts.delete(element); }
-    } catch (_) {}
+    if (element) void disposePlotly(element).catch(error => logger.error('Chart cleanup failed:', error));
     flushMainRender();
 }
 
@@ -1530,7 +1550,7 @@ export function initChart() {
 
 }
 
-export function cleanupSubpageChart(root) {
+export async function cleanupSubpageChart(root) {
     if (!root) return;
     cancelChartFlush();
     clearTimeout(chartElementResizeTimeout);
@@ -1540,10 +1560,7 @@ export function cleanupSubpageChart(root) {
         observedChartElement = null;
         observedChartSize = { width: 0, height: 0 };
     }
-    root.querySelectorAll('#plotly-chart').forEach(element => {
-        if (window.Plotly) Plotly.purge(element);
-        renderedTraceCounts.delete(element);
-    });
+    await Promise.all([...root.querySelectorAll('#plotly-chart')].map(disposePlotly));
 }
 
 export function setTheme(theme) {

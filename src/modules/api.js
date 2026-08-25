@@ -197,7 +197,7 @@ export async function connectScaleDevice() {
          return response.json();
     } catch (error) {
         logger.error('Error during scale connection attempt:', error);
-        return response.json();
+        throw error;
     }
 }
 

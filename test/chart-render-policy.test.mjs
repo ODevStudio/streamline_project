@@ -59,3 +59,11 @@ test('hidden main charts retain one pending render and flush when the main page 
     assert.match(chart, /document\.addEventListener\('streamline:mainpagevisible', flushDeferredChart\)/);
     assert.match(router, /document\.dispatchEvent\(new Event\('streamline:mainpagevisible'\)\)/);
 });
+
+test('chart teardown invalidates queued work before purge', () => {
+    const chart = read('src/modules/chart.js');
+    assert.match(chart, /renderGenerations\.set\(element, generation\);[\s\S]*await enqueue\?\.dispose\(\);[\s\S]*Plotly\.purge\(element\)/);
+    assert.match(chart, /!element\.isConnected \|\| renderGenerations\.get\(element\) !== generation/g);
+    assert.match(chart, /requestedFullRenderRevisions\.delete\(element\)/);
+    assert.match(chart, /appliedFullRenderRevisions\.delete\(element\)/);
+});
