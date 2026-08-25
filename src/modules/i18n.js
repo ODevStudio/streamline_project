@@ -1,6 +1,7 @@
 import { logger } from './logger.js';
 import { openDB, getSetting, setSetting } from './idb.js';
 import { SUPPORTED_LANGUAGES, parseTranslationColumn } from './i18n-parser.js';
+import { APP_VERSION } from '../version.js';
 
 let translations = {};
 let keyIndex = {};
@@ -36,7 +37,16 @@ async function loadTranslations(language) {
         return;
     }
     if (loadedLanguage === language) return;
-    const parsed = parseTranslationColumn(await getTranslationCsv(), language);
+    const cacheKey = `translations:${APP_VERSION}:${language}`;
+    let parsed;
+    try {
+        await openDB();
+        parsed = await getSetting(cacheKey);
+    } catch (_) {}
+    if (!parsed?.table || !parsed?.keyIndex) {
+        parsed = parseTranslationColumn(await getTranslationCsv(), language);
+        setSetting(cacheKey, parsed).catch(() => {});
+    }
     translations = parsed.table;
     keyIndex = parsed.keyIndex;
     loadedLanguage = language;
@@ -253,6 +263,8 @@ export async function setLanguage(lang) {
         setSetting('language', nextLanguage).catch(() => {});
     }
     logger.info(`Language set to: ${currentLanguage}`);
+    const switcher = document.getElementById('language-switcher');
+    if (switcher) switcher.value = currentLanguage;
     translatePage();
     document.dispatchEvent(new CustomEvent('streamline:languagechange', { detail: { language: currentLanguage } }));
     return currentLanguage;
@@ -262,17 +274,16 @@ export async function setLanguage(lang) {
  * Initializes the internationalization module.
  */
 export async function initI18n() {
-    // IDB is primary (survives WebView process kills on iOS/Android).
-    // localStorage is fallback for first run or when IDB hasn't been written yet.
-    let savedLang = null;
+    const localLanguage = findSupportedLanguage(localStorage.getItem('language'));
+    const initialLanguage = localLanguage || findSupportedLanguage(navigator.language) || 'en';
+    currentLanguage = initialLanguage;
+    localStorage.setItem('language', initialLanguage);
+    translatePage();
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    let savedLanguage = null;
     try {
         await openDB();
-        savedLang = await getSetting('language');
+        savedLanguage = findSupportedLanguage(await getSetting('language'));
     } catch (_) {}
-    if (!savedLang) {
-        savedLang = localStorage.getItem('language');
-    }
-
-    const initialLang = findSupportedLanguage(savedLang) || findSupportedLanguage(navigator.language) || 'en';
-    await setLanguage(initialLang);
+    await setLanguage(savedLanguage || initialLanguage);
 }

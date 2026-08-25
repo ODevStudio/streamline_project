@@ -46,3 +46,24 @@ test('startup settings prefetch reuses the workflow loaded for the dashboard', (
     assert.match(app, /prefetchSettingsToIDB\(initialWorkflow\)/);
     assert.match(app, /workflow \? Promise\.resolve\(workflow\) : getWorkflow\(\)/);
 });
+
+test('startup scales and reveals before asynchronous preference reconciliation', () => {
+    const app = read('src/modules/app.js');
+    const scaling = read('src/modules/scaling.js');
+    const css = read('src/css/main.css');
+    assert.ok(app.indexOf('initScaling();') < app.indexOf('await Promise.all([i18nReady, unitsReady])'));
+    assert.match(scaling, /updateScale\(\);[\s\S]*requestAnimationFrame\(\(\) => content\.classList\.add\('scaled'\)\)/);
+    assert.match(scaling, /setTimeout\(updateScale, 250\)/);
+    assert.doesNotMatch(scaling, /\}, 300\);\s*\}, 100\);/);
+    assert.doesNotMatch(css.match(/#scaled-content \{[\s\S]*?\}/)?.[0] || '', /opacity|transition/);
+});
+
+test('startup preferences use local storage before IndexedDB and translations are version cached', () => {
+    const i18n = read('src/modules/i18n.js');
+    const units = read('src/modules/units.js');
+    assert.ok(i18n.indexOf("localStorage.getItem('language')") < i18n.indexOf("getSetting('language')"));
+    assert.ok(units.indexOf('localStorage.getItem(TEMP_UNIT_KEY)') < units.indexOf('getSetting(TEMP_UNIT_KEY)'));
+    assert.match(i18n, /`translations:\$\{APP_VERSION\}:\$\{language\}`/);
+    assert.match(i18n, /parsed = await getSetting\(cacheKey\)/);
+    assert.match(i18n, /setSetting\(cacheKey, parsed\)/);
+});

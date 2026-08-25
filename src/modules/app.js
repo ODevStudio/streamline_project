@@ -1966,17 +1966,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         setDebug(true);
         logger.info('App DOMContentLoaded: Starting initialization.');
 
+        initScaling();
+        const i18nReady = initI18n();
+        const unitsReady = initUnits();
         chart.initChart();
         wireExpandedChart();
         logger.info('App DOMContentLoaded: Chart initialized.');
 
-        await initI18n();
-        await initUnits();
         ui.initUI({ onWeightClick: handleWeightClick }); // also inits the screensaver
-        initScaling();
         initNumpadModal();
         initTimePicker();
         initMobileValueInputs();
+        await Promise.all([i18nReady, unitsReady]);
         logger.info('App DOMContentLoaded: UI initialized.');
 
         // Check URL and load appropriate page if navigating directly to a route
