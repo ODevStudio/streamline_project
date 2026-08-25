@@ -1,8 +1,9 @@
 import { logger } from './logger.js';
 
 const DB_NAME = 'shot_history';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 const SHOTS_STORE_NAME = 'shots';
+const SHOT_SUMMARIES_STORE_NAME = 'shot_summaries';
 const SETTINGS_STORE_NAME = 'settings';
 const EMAILS_STORE_NAME = 'decent_emails';
 
@@ -79,15 +80,23 @@ export function openDB() {
                 logger.info('Creating by_timestamp index on shots store');
                 shotsStore.createIndex('by_timestamp', 'timestamp');
             }
+            let shotSummariesStore;
+            if (!tempDb.objectStoreNames.contains(SHOT_SUMMARIES_STORE_NAME)) {
+                shotSummariesStore = tempDb.createObjectStore(SHOT_SUMMARIES_STORE_NAME, { keyPath: 'id' });
+            } else {
+                shotSummariesStore = upgradeTransaction.objectStore(SHOT_SUMMARIES_STORE_NAME);
+            }
+            if (!shotSummariesStore.indexNames.contains('by_timestamp')) {
+                shotSummariesStore.createIndex('by_timestamp', 'timestamp');
+            }
             if (!tempDb.objectStoreNames.contains(SETTINGS_STORE_NAME)) {
                 logger.info('Creating settings object store');
                 tempDb.createObjectStore(SETTINGS_STORE_NAME, { keyPath: 'id' });
             }
-            if (tempDb.objectStoreNames.contains(EMAILS_STORE_NAME)) {
-                tempDb.deleteObjectStore(EMAILS_STORE_NAME);
+            if (!tempDb.objectStoreNames.contains(EMAILS_STORE_NAME)) {
+                logger.info('Creating decent_emails object store');
+                tempDb.createObjectStore(EMAILS_STORE_NAME, { keyPath: 'emailid' });
             }
-            logger.info('Creating decent_emails object store');
-            tempDb.createObjectStore(EMAILS_STORE_NAME, { keyPath: 'emailid' });
         };
     });
     return openPromise;
@@ -129,9 +138,9 @@ export function addShot(shot) {
         if (!db) {
             return reject('DB not open');
         }
-        const transaction = db.transaction([SHOTS_STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(SHOTS_STORE_NAME);
-        store.put(shot);
+        const transaction = db.transaction([SHOTS_STORE_NAME, SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+        transaction.objectStore(SHOTS_STORE_NAME).put(shot);
+        transaction.objectStore(SHOT_SUMMARIES_STORE_NAME).put(toShotSummary(shot));
 
         transaction.oncomplete = () => {
             logger.info('Shot added to IndexedDB');
@@ -155,10 +164,10 @@ export function addShots(shotsArray) {
         if (!shotsArray || shotsArray.length === 0) {
             return resolve();
         }
-        const transaction = db.transaction([SHOTS_STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(SHOTS_STORE_NAME);
+        const transaction = db.transaction([SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME);
         for (const shot of shotsArray) {
-            store.put(shot);
+            store.put(toShotSummary(shot));
         }
 
         transaction.oncomplete = () => {
@@ -170,6 +179,46 @@ export function addShots(shotsArray) {
             logger.error('Error bulk-adding shots to IndexedDB:', event.target.error);
             reject('Error bulk-adding shots.');
         };
+    });
+}
+
+function toShotSummary(shot) {
+    const { measurements, ...summary } = shot;
+    return summary;
+}
+
+export function getLatestShotSummaries(limit) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        if (limit <= 0) return resolve([]);
+        const transaction = db.transaction([SHOT_SUMMARIES_STORE_NAME], 'readonly');
+        const request = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME)
+            .index('by_timestamp')
+            .openCursor(null, 'prev');
+        const summaries = [];
+
+        request.onsuccess = (event) => {
+            const cursor = event.target.result;
+            if (!cursor || summaries.length >= limit) return resolve(summaries);
+            summaries.push(cursor.value);
+            if (summaries.length >= limit) return resolve(summaries);
+            cursor.continue();
+        };
+        request.onerror = (event) => {
+            logger.error('Error getting latest shot summaries from IndexedDB:', event.target.error);
+            reject('Error getting shot summaries.');
+        };
+    });
+}
+
+export function getShotSummaryCount() {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const request = db.transaction([SHOT_SUMMARIES_STORE_NAME], 'readonly')
+            .objectStore(SHOT_SUMMARIES_STORE_NAME)
+            .count();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = (event) => reject(event.target.error);
     });
 }
 
@@ -272,9 +321,9 @@ export function deleteShot(id) {
         if (!db) {
             return reject('DB not open');
         }
-        const transaction = db.transaction([SHOTS_STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(SHOTS_STORE_NAME);
-        store.delete(id);
+        const transaction = db.transaction([SHOTS_STORE_NAME, SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+        transaction.objectStore(SHOTS_STORE_NAME).delete(id);
+        transaction.objectStore(SHOT_SUMMARIES_STORE_NAME).delete(id);
 
         transaction.oncomplete = () => {
             logger.info('Shot deleted from IndexedDB');
@@ -293,9 +342,9 @@ export function clearShots() {
         if (!db) {
             return reject('DB not open');
         }
-        const transaction = db.transaction([SHOTS_STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(SHOTS_STORE_NAME);
-        store.clear();
+        const transaction = db.transaction([SHOTS_STORE_NAME, SHOT_SUMMARIES_STORE_NAME], 'readwrite');
+        transaction.objectStore(SHOTS_STORE_NAME).clear();
+        transaction.objectStore(SHOT_SUMMARIES_STORE_NAME).clear();
 
         transaction.oncomplete = () => {
             logger.info('Shot history cleared from IndexedDB');

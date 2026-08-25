@@ -1,6 +1,6 @@
 import * as chart from './chart.js';
 import { logger } from './logger.js';
-import { openDB, getAllShots, getLatestCachedShot, addShot, addShots, deleteShot as idbDeleteShot, clearShots } from './idb.js';
+import { openDB, getLatestShotSummaries, getShotSummaryCount, getLatestCachedShot, getShot, addShot, addShots, deleteShot as idbDeleteShot, clearShots } from './idb.js';
 import { API_BASE_URL } from './api.js';
 import { renderPastShot, clearShotData } from './shotData.js';
 import { getTranslation } from './i18n.js';
@@ -89,9 +89,12 @@ async function loadShotHistory() {
     }
 
     try {
-        shots = await getAllShots();
-        shots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        if (totalAvailable < shots.length) totalAvailable = shots.length;
+        shots = await getLatestShotSummaries(PAGE_SIZE);
+        if (shots.length === 0) {
+            const cached = await getLatestCachedShot();
+            if (cached) shots = [cached];
+        }
+        totalAvailable = Math.max(totalAvailable, await getShotSummaryCount(), shots.length);
         logger.info('Shot history loaded:', shots.length, 'shots');
     } catch (error) {
         logger.error('Error loading shots from IndexedDB:', error);
@@ -105,13 +108,27 @@ async function loadMoreShots() {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         totalAvailable = data.total ?? totalAvailable;
-        for (const shot of data.items ?? []) {
-            await addShot(shot);
-            shots.push(shot);
-        }
+        const nextShots = data.items ?? [];
+        await addShots(nextShots);
+        shots = [...shots, ...nextShots];
         logger.info(`Loaded ${data.items?.length ?? 0} more shots.`);
     } catch (error) {
         logger.warn('Could not load more shots:', error);
+    }
+}
+
+async function loadFullShot(shot) {
+    try {
+        const cached = await getShot(shot.id);
+        if (cached?.measurements) return { ...cached, ...shot, measurements: cached.measurements };
+        const response = await fetch(`${API_BASE_URL}/shots/${shot.id}`);
+        if (!response.ok) return shot;
+        const fullShot = { ...shot, ...(await response.json()) };
+        await addShot(fullShot);
+        return fullShot;
+    } catch (error) {
+        logger.warn('Could not load full shot data:', error);
+        return shot;
     }
 }
 
@@ -176,28 +193,21 @@ async function displayShot(index) {
     }
 
     // Lazy-load measurements if not present
-    if (!shots[currentShotIndex].measurements) {
-        try {
-            const response = await fetch(`${API_BASE_URL}/shots/${shot.id}`);
-            if (response.ok) {
-                const fullShot = await response.json();
-                shots[currentShotIndex] = { ...shot, ...fullShot };
-                await addShot(shots[currentShotIndex]);
-            }
-        } catch (error) {
-            logger.warn('Could not fetch full shot data:', error);
-        }
+    if (!shots[index].measurements) {
+        const fullShot = await loadFullShot(shot);
+        if (currentShotIndex !== index || shots[index]?.id !== shot.id) return;
+        shots = shots.map((item, itemIndex) => itemIndex === index ? fullShot : item);
     }
 
-    if (shots[currentShotIndex].measurements) {
+    if (shots[index].measurements) {
         // Skip the redraw if paintNewestShotFast() already drew this exact
         // shot moments ago during boot -- same data, avoid a pointless second
         // Plotly.react().
         if (paintedShotId !== shot.id) {
-            chart.plotHistoricalShot(shots[currentShotIndex].measurements, shots[currentShotIndex].workflow);
+            chart.plotHistoricalShot(shots[index].measurements, shots[index].workflow);
             paintedShotId = shot.id;
         }
-        renderPastShot(shots[currentShotIndex]);
+        renderPastShot(shots[index]);
     }
 
     // Update button states
@@ -216,24 +226,6 @@ async function displayShot(index) {
         loadMoreShots();
     }
 
-    // Warm the neighbours so the next arrow tap draws without a network stall.
-    prefetchMeasurements(index - 1);
-    prefetchMeasurements(index + 1);
-}
-
-// Fire-and-forget load of a shot's measurements into the cache. No-op if the
-// index is out of range or the shot already has data.
-function prefetchMeasurements(index) {
-    const shot = shots[index];
-    if (!shot || shot.measurements) return;
-    fetch(`${API_BASE_URL}/shots/${shot.id}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(full => {
-            if (!full || shots[index]?.id !== shot.id || shots[index].measurements) return;
-            shots[index] = { ...shots[index], ...full };
-            addShot(shots[index]);
-        })
-        .catch(() => {}); // prefetch is best-effort
 }
 
 // Re-plot the currently selected history shot. The main-page chart shares the
@@ -251,19 +243,14 @@ export function refreshCurrentShot() {
 // Ensure the current shot has its measurements loaded (the list endpoint
 // strips them; the summary needs the full record).
 async function ensureCurrentShotMeasurements() {
-    const shot = shots[currentShotIndex];
+    const index = currentShotIndex;
+    const shot = shots[index];
     if (!shot) return null;
     if (shot.measurements) return shot;
-    try {
-        const response = await fetch(`${API_BASE_URL}/shots/${shot.id}`);
-        if (response.ok) {
-            shots[currentShotIndex] = { ...shot, ...(await response.json()) };
-            await addShot(shots[currentShotIndex]);
-        }
-    } catch (error) {
-        logger.warn('Could not fetch full shot data for summary:', error);
-    }
-    return shots[currentShotIndex];
+    const fullShot = await loadFullShot(shot);
+    if (currentShotIndex !== index || shots[index]?.id !== shot.id) return null;
+    shots = shots.map((item, itemIndex) => itemIndex === index ? fullShot : item);
+    return shots[index];
 }
 
 async function copyText(text) {
@@ -440,8 +427,8 @@ export async function updateShot(id, updates) {
     const updated = await response.json();
     const idx = shots.findIndex(s => s.id === id);
     if (idx !== -1) {
-        shots[idx] = { ...shots[idx], ...updated };
-        await addShot(shots[idx]);
+        shots = shots.map((shot, index) => index === idx ? { ...shot, ...updated } : shot);
+        await addShots([shots[idx]]);
     }
     return updated;
 }
