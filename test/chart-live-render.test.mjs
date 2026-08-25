@@ -3,6 +3,9 @@ import { test } from 'node:test';
 
 test('live chart frames use one paint-aligned update and defer while hidden', async () => {
     const chartElement = { offsetParent: {}, clientWidth: 960, clientHeight: 390 };
+    const expandedElement = { offsetParent: {}, clientWidth: 1920, clientHeight: 1104 };
+    const expandedOverlay = { style: { display: 'none' } };
+    const helpButton = { style: { display: '' } };
     const mainPage = {
         style: { display: 'block' },
         querySelector: selector => selector === '#plotly-chart' ? chartElement : null
@@ -10,7 +13,12 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     const documentTarget = new EventTarget();
     Object.assign(documentTarget, {
         visibilityState: 'visible',
-        getElementById: id => id === 'main-page' ? mainPage : null,
+        getElementById: id => ({
+            'main-page': mainPage,
+            'expanded-chart': expandedElement,
+            'expanded-chart-overlay': expandedOverlay,
+            'help-overlay-btn': helpButton
+        })[id] || null,
         createElement: () => ({
             style: {},
             getContext: () => ({ measureText: text => ({ width: text.length * 8 }) })
@@ -28,8 +36,15 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
 
     const calls = [];
     globalThis.Plotly = {
-        react: async (_element, traces) => calls.push({ method: 'react', lengths: traces.map(trace => trace.x.length) }),
-        update: async (_element, data, layout) => calls.push({ method: 'update', lengths: data.x.map(values => values.length), layout })
+        react: async (element, traces) => calls.push({
+            method: 'react',
+            element,
+            lengths: traces.map(trace => trace.x.length),
+            axes: traces.map(trace => [trace.xaxis || 'x', trace.yaxis || 'y'])
+        }),
+        update: async (element, data, layout) => calls.push({ method: 'update', element, lengths: data.x.map(values => values.length), layout }),
+        Plots: { resize: () => {} },
+        purge: () => {}
     };
 
     const chart = await import(`../src/modules/chart.js?live-render=${Date.now()}`);
@@ -45,7 +60,10 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
         flow: seconds / 2,
         targetPressure: 9,
         targetFlow: 0,
-        groupTemperature: 9200
+        groupTemperature: 92,
+        targetGroupTemperature: 93,
+        mixTemperature: 90,
+        targetMixTemperature: 85
     });
 
     chart.updateChart(start, frame(1), 1);
@@ -54,7 +72,7 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     await new Promise(resolve => setTimeout(resolve, 20));
 
     assert.equal(calls.filter(call => call.method === 'update').length, 1);
-    assert.deepEqual(calls.at(-1).lengths, [3, 3, 3, 3, 3, 0, 3]);
+    assert.deepEqual(calls.at(-1).lengths, [3, 3, 3, 3, 3, 3, 3]);
     assert.equal('paper_bgcolor' in calls.at(-1).layout, false);
     assert.deepEqual(calls.at(-1).layout['xaxis.range'].map(Math.round), [0, 3]);
 
@@ -67,5 +85,20 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     documentTarget.dispatchEvent(new Event('visibilitychange'));
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.equal(calls.filter(call => call.method === 'update').length, 2);
-    assert.deepEqual(calls.at(-1).lengths, [4, 4, 4, 4, 4, 0, 4]);
+    assert.deepEqual(calls.at(-1).lengths, [4, 4, 4, 4, 4, 4, 4]);
+
+    chart.openExpandedChart();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const expandedCalls = calls.filter(call => call.method === 'react' && call.element === expandedElement);
+    assert.equal(expandedCalls.length, 1);
+    assert.equal(expandedCalls[0].lengths.length, 9);
+    assert.equal(expandedCalls[0].axes.filter(([x, y]) => x === 'x2' && y === 'y2').length, 4);
+
+    chart.updateChart(start, frame(5), 5);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const expandedUpdates = calls.filter(call => call.method === 'update' && call.element === expandedElement);
+    assert.equal(expandedUpdates.length, 1);
+    assert.equal(expandedUpdates[0].lengths.length, 9);
+    assert.deepEqual(expandedUpdates[0].layout['yaxis2.range'].map(value => Math.round(value * 10)), [83, 98]);
+    chart.closeExpandedChart();
 });

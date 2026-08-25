@@ -38,10 +38,17 @@ test('live rendering is paint-aligned and skips hidden charts', () => {
 
 test('expanded mode renders only visible charts and restores a dirty main chart', () => {
     const chart = read('src/modules/chart.js');
+    const index = read('index.html');
     assert.match(chart, /MAIN_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: true \}/);
     assert.match(chart, /EXPANDED_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: false \}/);
     assert.match(chart, /if \(!element \|\| element\.offsetParent === null \|\| expandedOpen\) \{\s*mainRenderDirty = true;\s*return;/);
     assert.match(chart, /if \(mainRenderDirty && latestMainRender && !expandedOpen\)/);
+    assert.match(index, /id="expanded-chart"/);
+    assert.doesNotMatch(index, /id="expanded-(flow|temp)-chart"/);
+    assert.doesNotMatch(chart, /expandedSeries|expandedDataRev/);
+    assert.match(chart, /computeExpandedTopYMax\(\[\[expandedTopMax\]\], expandedTopYMax\)/);
+    assert.match(chart, /renderPlotly\(element, \[\.\.\.expandedTopTraces\(\), \.\.\.expandedTempTraces\(\)\]/);
+    assert.match(chart, /\.\.\.chartData\.pressure/);
 });
 
 test('hidden main charts retain one pending render and flush when the main page returns', () => {
