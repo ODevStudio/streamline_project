@@ -500,7 +500,7 @@ function setupValueAdjuster(minusBtnId, plusBtnId, valueElId, step, min, formatt
     });
 }
 
-export const LONG_PRESS_MS = 600;
+export const LONG_PRESS_MS = 500;
 
 function makeNumpadMockInput(initialValue) {
     return {
@@ -512,71 +512,80 @@ function makeNumpadMockInput(initialValue) {
 }
 
 export function setupPressAndHold(element, clickCallback, longPressCallback, options = {}) {
-    if (element.dataset.pressHoldInit) return; // already wired — prevent duplicate listeners on re-init
+    if (element.dataset.pressHoldInit) return;
     element.dataset.pressHoldInit = '1';
 
     const duration = options.duration ?? LONG_PRESS_MS;
+    const movementThreshold = options.movementThreshold ?? 10;
+    element.style.touchAction = options.touchAction ?? 'manipulation';
 
     let timer;
-    let longPressOccurred = false;
+    let pointerId = null;
+    let pointerType = '';
+    let startX = 0;
+    let startY = 0;
+    let suppressClick = false;
+    let suppressClickReset;
 
     const setActiveRing = (on) => {
         if (on) element.classList.add('long-press-active');
         else element.classList.remove('long-press-active');
     };
 
-    const startPress = (e) => {
-        e.preventDefault();
-        longPressOccurred = false;
+    const cancelPress = () => {
+        clearTimeout(timer);
+        pointerId = null;
+        setActiveRing(false);
+    };
+
+    const startPress = (event) => {
+        if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        clearTimeout(timer);
+        pointerId = event.pointerId;
+        pointerType = event.pointerType;
+        startX = event.clientX;
+        startY = event.clientY;
+        suppressClick = false;
+        clearTimeout(suppressClickReset);
         setActiveRing(true);
         timer = setTimeout(() => {
-            longPressOccurred = true;
+            suppressClick = true;
+            suppressClickReset = setTimeout(() => { suppressClick = false; }, 1000);
             setActiveRing(false);
+            if (pointerType === 'touch' && typeof navigator.vibrate === 'function') {
+                try { navigator.vibrate(10); } catch {}
+            }
             longPressCallback(element);
         }, duration);
     };
 
-    const endPress = (e) => {
-        clearTimeout(timer);
-        setActiveRing(false);
-        if (longPressOccurred) {
-            e.preventDefault();
-            e.stopPropagation();
-        } else if (e.type === 'touchend') {
-            // preventDefault on touchstart suppressed the synthetic click — fire manually
-            e.preventDefault();
-            clickCallback();
-        }
+    const movePress = (event) => {
+        if (event.pointerId !== pointerId) return;
+        if (Math.hypot(event.clientX - startX, event.clientY - startY) > movementThreshold) cancelPress();
     };
 
-    const cancelPress = () => {
-        clearTimeout(timer);
-        setActiveRing(false);
+    const endPress = (event) => {
+        if (event.pointerId === pointerId) cancelPress();
     };
 
-    // Desktop right-click opens the same menu (mouse parity)
-    element.addEventListener('contextmenu', e => {
-        e.preventDefault();
+    element.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        cancelPress();
         longPressCallback(element);
     });
 
-    // Mouse events
-    element.addEventListener('mousedown', startPress);
-    element.addEventListener('mouseup', endPress);
-    element.addEventListener('mouseleave', cancelPress);
+    element.addEventListener('pointerdown', startPress);
+    element.addEventListener('pointermove', movePress);
+    element.addEventListener('pointerup', endPress);
+    element.addEventListener('pointercancel', endPress);
+    element.addEventListener('pointerleave', endPress);
 
-    // Touch events
-    element.addEventListener('touchstart', startPress, { passive: false });
-    element.addEventListener('touchend', endPress);
-    element.addEventListener('touchcancel', cancelPress);
-
-    element.addEventListener('click', (e) => {
-        if (longPressOccurred) {
-            e.preventDefault();
-            e.stopPropagation();
-        } else {
-            clickCallback();
-        }
+    element.addEventListener('click', (event) => {
+        if (!suppressClick) return clickCallback();
+        suppressClick = false;
+        clearTimeout(suppressClickReset);
+        event.preventDefault();
+        event.stopImmediatePropagation();
     });
 }
 
