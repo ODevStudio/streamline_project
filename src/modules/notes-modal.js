@@ -1,4 +1,6 @@
-import { loadEasyMDE } from './vendor-loader.js';
+import { loadEasyMDE, loadStyle } from './vendor-loader.js';
+
+loadStyle('src/css/notes-modal.css').catch(() => {});
 
 // ─── Notes Modal ───────────────────────────────────────────────────────────
 // Full-screen markdown editor modal using EasyMDE.

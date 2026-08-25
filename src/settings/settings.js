@@ -7902,6 +7902,16 @@ function setupSettingsSearch(activateResult) {
     });
 }
 
+export function cleanupSettings() {
+    stopCupWarmerPoll();
+    clearTimeout(_settingsNumpadTimer);
+    _settingsNumpadTimer = null;
+    clearTimeout(ledPutTimer);
+    ledPutTimer = null;
+    ledClearPreview();
+    if (calWsClaimed) calReleaseScaleWs();
+}
+
 /**
  * Initialize WebSocket connection for live device state updates
  * Should be called once when the settings page loads

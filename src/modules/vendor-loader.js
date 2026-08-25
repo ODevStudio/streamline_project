@@ -33,9 +33,13 @@ function loadScript(path, globalName) {
     });
 }
 
+export function loadStyle(path) {
+    return loadElement('link', path);
+}
+
 export function loadEasyMDE() {
     return Promise.all([
-        loadElement('link', 'src/vendor/easymde.min.css'),
+        loadStyle('src/vendor/easymde.min.css'),
         loadScript('src/vendor/easymde.min.js', 'EasyMDE'),
     ]).then(([, EasyMDE]) => EasyMDE);
 }

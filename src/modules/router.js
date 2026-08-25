@@ -1,4 +1,5 @@
 const pageCache = new Map();
+let cleanupCurrentPage = null;
 
 function getCleanUrl(pageUrl) {
     const filename = pageUrl.split('/').pop().replace('.html', '');
@@ -36,7 +37,7 @@ window.addEventListener('popstate', async (event) => {
     if (event.state && event.state.pageUrl) {
         await loadPage(event.state.pageUrl);
     } else {
-        showMainPage();
+        await showMainPage();
     }
 });
 
@@ -70,11 +71,21 @@ function isIndexUrl(pageUrl) {
     return lc === 'index.html' || lc === '/' || lc === '' || lc.endsWith('/index.html');
 }
 
-function showMainPage() {
+async function cleanupSubpage() {
+    cleanupCurrentPage?.();
+    cleanupCurrentPage = null;
+    const root = document.getElementById('subpage-host');
+    if (!root?.children.length) return;
+    const { cleanupSubpageChart } = await import('./chart.js');
+    cleanupSubpageChart(root);
+}
+
+async function showMainPage() {
     const mainPage = document.getElementById('main-page');
     const subpageHost = document.getElementById('subpage-host');
 
     if (subpageHost) {
+        await cleanupSubpage();
         subpageHost.style.display = 'none';
         subpageHost.innerHTML = '';
     }
@@ -127,7 +138,7 @@ function showMainPage() {
 
 export async function loadPage(pageUrl) {
     if (isIndexUrl(pageUrl)) {
-        showMainPage();
+        await showMainPage();
         return;
     }
 
@@ -146,11 +157,13 @@ export async function loadPage(pageUrl) {
             return;
         }
 
+        await cleanupSubpage();
         subpageHost.innerHTML = newContent.innerHTML;
 
         if (pageUrl.includes('settings.html')) {
-            const { initializeSettingsShell } = await import('../settings/settings-shell.js');
+            const { cleanupSettingsShell, initializeSettingsShell } = await import('../settings/settings-shell.js');
             await initializeSettingsShell();
+            cleanupCurrentPage = cleanupSettingsShell;
         }
 
         if (mainPage) mainPage.style.display = 'none';

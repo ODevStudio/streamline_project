@@ -47,6 +47,41 @@ test('startup settings prefetch reuses the workflow loaded for the dashboard', (
     assert.match(app, /workflow \? Promise\.resolve\(workflow\) : getWorkflow\(\)/);
 });
 
+test('noncritical styles and duplicate module entries do not block startup', () => {
+    const index = read('index.html');
+    for (const asset of ['numpad-modal.css', 'time-picker-modal.css', 'notes-modal.css', 'context-menu.css', 'help-overlay.css']) {
+        assert.doesNotMatch(index, new RegExp(`<link[^>]+${asset.replace('.', '\\.')}[^>]*>`));
+    }
+    assert.doesNotMatch(index, /<script[^>]+router\.js/);
+    assert.doesNotMatch(index, /<script[^>]+helpOverlay\.js/);
+});
+
+test('help implementation and route resources are deferred and cleaned up', () => {
+    const app = read('src/modules/app.js');
+    const ui = read('src/modules/ui.js');
+    const launcher = read('src/modules/help-launcher.js');
+    const router = read('src/modules/router.js');
+    const chart = read('src/modules/chart.js');
+    assert.match(app, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+    assert.doesNotMatch(app, /^import .*numpad-modal\.js/m);
+    assert.doesNotMatch(app, /^import .*time-picker-modal\.js/m);
+    assert.doesNotMatch(ui, /^import .*numpad-modal\.js/m);
+    assert.match(app, /import\('\.\/numpad-modal\.js'\)/);
+    assert.match(app, /import\('\.\/time-picker-modal\.js'\)/);
+    assert.match(launcher, /import\('\.\/helpOverlay\.js'\)/);
+    assert.match(router, /await cleanupSubpage\(\)/);
+    assert.match(chart, /export function cleanupSubpageChart/);
+});
+
+test('production startup logging is disabled', () => {
+    const app = read('src/modules/app.js');
+    const chart = read('src/modules/chart.js');
+    const logger = read('src/modules/logger.js');
+    assert.doesNotMatch(app, /setDebug\(true\)/);
+    assert.doesNotMatch(chart, /console\.log\('initChart/);
+    assert.match(logger, /info: noop/);
+});
+
 test('startup scales and reveals before asynchronous preference reconciliation', () => {
     const app = read('src/modules/app.js');
     const scaling = read('src/modules/scaling.js');

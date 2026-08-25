@@ -321,3 +321,14 @@ export async function initializeSettingsShell() {
     if (first) selectMainCategory(first, saved?.category);
     translatePage();
 }
+
+export function cleanupSettingsShell() {
+    currentCleanup?.();
+    currentCleanup = null;
+    currentRoot = null;
+    legacyMounted = false;
+    renderSequence += 1;
+    clearTimeout(searchTimer);
+    searchTimer = null;
+    resetSettingsSession();
+}

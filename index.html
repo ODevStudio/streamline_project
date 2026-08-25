@@ -31,18 +31,11 @@
     <link href="src/css/app.css" rel="stylesheet" type="text/css" />
     <link href="src/css/dark-mode.css" rel="stylesheet" type="text/css" />
     <link href="src/css/main.css" rel="stylesheet" type="text/css" />
-    <link href="src/css/numpad-modal.css" rel="stylesheet" type="text/css" />
-    <link href="src/css/time-picker-modal.css" rel="stylesheet" type="text/css" />
-    <link href="src/css/notes-modal.css" rel="stylesheet" type="text/css" />
-    <link href="src/css/context-menu.css" rel="stylesheet" type="text/css" />
-    <link href="src/css/help-overlay.css" rel="stylesheet" type="text/css" />
     <script src="src/modules/plotly-basic-3.1.0.min.js"></script>
     <script src="src/modules/reconnecting-websocket.js" defer></script>
-    <script src="src/modules/router.js" type="module"></script>
     <script src="src/modules/app.js" type="module"></script>
-    <script src="src/modules/helpOverlay.js" type="module"></script>
 </head>
-<body class="bg-[var(--bgmain-color)] min-h-screen ">
+<body class="bg-[var(--bgmain-color)] min-h-screen">
     <div id="scaling-container" class=" text-clip">
         <div id="scaled-content" class="">
         <div id="main-page">
@@ -454,9 +447,6 @@
         const exit = () => {
             const app = window.decentApp;
             if (app && typeof app.exitToDashboard === 'function') { app.exitToDashboard(); return; }
-            console.log('[exit-btn] no host exit API', JSON.stringify({
-                decentApp: app ? Object.keys(app) : null, host: window.__DECENT_HOST__ || null, ua,
-            }));
             window.app?.ui?.showToast?.('No dashboard exit API in this host', 3000, 'error');
         };
         const POS_KEY = 'exitBtnPos';
@@ -470,12 +460,6 @@
             Object.assign(btn.style, { left: `${x}px`, top: `${y}px`, right: 'auto', bottom: 'auto' });
             return { left: x, top: y };
         };
-
-        console.log('[exit-btn] init', JSON.stringify({
-            inWebView, host: window.__DECENT_HOST__ || null,
-            hasApi: typeof window.decentApp?.exitToDashboard === 'function',
-            hidden: !!sessionStorage.getItem('exitBtnHidden'), ua,
-        }));
 
         if (inWebView && !sessionStorage.getItem('exitBtnHidden')) {
             btn.style.display = 'flex';

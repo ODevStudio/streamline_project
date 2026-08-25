@@ -862,11 +862,6 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
             stepMarkerAdded = true;
             // logger.debug(`updateChart: step marker added at time=${time.toFixed(2)}s`);
         }
-    } else if (currentProfile && currentProfile.steps) {
-        // Log when profileFrame is missing (helps debug late-arriving profileFrame data)
-        logger.debug(`updateChart: NO profileFrame (is ${data.profileFrame}), time=${time.toFixed(2)}s, liveProfileFrame=${liveProfileFrame}, substate=${data.state.substate}`);
-    } else if (!currentProfile) {
-        logger.debug(`updateChart: NO currentProfile set, time=${time.toFixed(2)}s, substate=${data.state.substate}`);
     }
 
 
@@ -1510,17 +1505,11 @@ function observeChartElement(element) {
 }
 
 export function initChart() {
-    console.log('initChart: Starting chart initialization');
-
     const element = getChartElement();
     if (!element) {
         console.error('initChart: chartElement is not found in the DOM');
         return;
     }
-
-    console.log('initChart: chartElement found, offsetParent:', element.offsetParent !== null);
-    console.log('initChart: chartElement visibility:', window.getComputedStyle ? window.getComputedStyle(element).visibility : 'unknown');
-    console.log('initChart: chartElement display:', window.getComputedStyle ? window.getComputedStyle(element).display : 'unknown');
 
     currentTheme = localStorage.getItem('theme') || 'light';
     const theme = currentTheme;
@@ -1539,7 +1528,22 @@ export function initChart() {
     // which call Plotly.react and work fine as an initial draw) happens once
     // there's actual data to show, by which point scaling has settled.
 
-    console.log('initChart: Chart initialization completed');
+}
+
+export function cleanupSubpageChart(root) {
+    if (!root) return;
+    cancelChartFlush();
+    clearTimeout(chartElementResizeTimeout);
+    chartElementResizeTimeout = 0;
+    if (observedChartElement && root.contains(observedChartElement)) {
+        chartResizeObserver?.unobserve(observedChartElement);
+        observedChartElement = null;
+        observedChartSize = { width: 0, height: 0 };
+    }
+    root.querySelectorAll('#plotly-chart').forEach(element => {
+        if (window.Plotly) Plotly.purge(element);
+        renderedTraceCounts.delete(element);
+    });
 }
 
 export function setTheme(theme) {
