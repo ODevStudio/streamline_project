@@ -65,25 +65,27 @@ function renderPlotly(element, traces, layout, config) {
 
 function renderMain(traces, layout) {
     latestMainRender = { traces, layout };
-    if (expandedOpen) {
+    const element = getChartElement();
+    if (!element || element.offsetParent === null || expandedOpen) {
         mainRenderDirty = true;
         return;
     }
-    const element = getChartElement();
-    if (!element) return;
     renderPlotly(element, traces, layout, MAIN_CHART_CONFIG);
     mainRenderDirty = false;
 }
 
-// Function to get or update the chart element reference
+function flushMainRender() {
+    if (mainRenderDirty && latestMainRender && !expandedOpen) {
+        renderMain(latestMainRender.traces, latestMainRender.layout);
+    }
+}
+
 function getChartElement() {
     const mainPage = document.getElementById('main-page');
-    if (mainPage && mainPage.style.display === 'none') {
-        const subpageHost = document.getElementById('subpage-host');
-        const el = subpageHost?.querySelector('#plotly-chart');
-        if (el) return el;
+    if (mainPage?.style.display === 'none') {
+        return document.getElementById('subpage-host')?.querySelector('#plotly-chart') ?? null;
     }
-    return document.getElementById('plotly-chart');
+    return mainPage?.querySelector('#plotly-chart') ?? null;
 }
 let currentSubstate = 'idle';
 let previousSubstateForShape = 'idle'; // To track step changes for vertical lines
@@ -751,9 +753,7 @@ export function closeExpandedChart() {
         if (t) { Plotly.purge(t); renderedTraceCounts.delete(t); }
         if (b) { Plotly.purge(b); renderedTraceCounts.delete(b); }
     } catch (_) {}
-    if (mainRenderDirty && latestMainRender) {
-        renderMain(latestMainRender.traces, latestMainRender.layout);
-    }
+    flushMainRender();
 }
 
 export function setCurrentProfile(profile) {
@@ -1441,6 +1441,7 @@ function ensureChartLifecycle() {
         window.addEventListener('resize', handleChartWindowResize);
         window.addEventListener('storage', handleChartStorage);
         document.addEventListener('streamline:languagechange', handleChartLanguageChange);
+        document.addEventListener('streamline:mainpagevisible', flushMainRender);
         chartLifecycleBound = true;
     }
     if (!chartResizeObserver && window.ResizeObserver) {

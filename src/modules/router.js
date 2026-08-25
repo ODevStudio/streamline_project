@@ -85,6 +85,7 @@ function showMainPage() {
     if (!window.app?.isShotActive?.()) {
         window.app?.clearChart?.();
     }
+    document.dispatchEvent(new Event('streamline:mainpagevisible'));
 
     // Ensure main-page data init has run — booting on a sub-page URL skips it,
     // so without this the main page would render static HTML with no data.

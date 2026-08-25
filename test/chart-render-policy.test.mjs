@@ -27,6 +27,15 @@ test('expanded mode renders only visible charts and restores a dirty main chart'
     const chart = read('src/modules/chart.js');
     assert.match(chart, /MAIN_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: true \}/);
     assert.match(chart, /EXPANDED_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: false \}/);
-    assert.match(chart, /if \(expandedOpen\) \{\s*mainRenderDirty = true;\s*return;/);
-    assert.match(chart, /if \(mainRenderDirty && latestMainRender\)/);
+    assert.match(chart, /if \(!element \|\| element\.offsetParent === null \|\| expandedOpen\) \{\s*mainRenderDirty = true;\s*return;/);
+    assert.match(chart, /if \(mainRenderDirty && latestMainRender && !expandedOpen\)/);
+});
+
+test('hidden main charts retain one pending render and flush when the main page returns', () => {
+    const chart = read('src/modules/chart.js');
+    const router = read('src/modules/router.js');
+    assert.match(chart, /return document\.getElementById\('subpage-host'\)\?\.querySelector\('#plotly-chart'\) \?\? null/);
+    assert.match(chart, /return mainPage\?\.querySelector\('#plotly-chart'\) \?\? null/);
+    assert.match(chart, /document\.addEventListener\('streamline:mainpagevisible', flushMainRender\)/);
+    assert.match(router, /document\.dispatchEvent\(new Event\('streamline:mainpagevisible'\)\)/);
 });
