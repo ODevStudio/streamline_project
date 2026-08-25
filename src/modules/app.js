@@ -8,7 +8,7 @@ import * as history from './history.js';
 import * as shotData from './shotData.js';
 import * as profileManager from './profileManager.js';
 import * as api from './api.js';
-import { loadPage, initRouter, isSubPage } from './router.js';
+import { loadPage, initRouter, isSubPage, prefetchSettingsPage } from './router.js';
 import { initWaterTankSocket, isTankBelowRefillLevel } from './waterTank.js';
 import { logger, setDebug } from './logger.js';
 import { deriveScreensaverAction, isMachineAsleep, isScreensaverSuppressed } from './screensaver-policy.js';
@@ -2177,6 +2177,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Add event listener for the settings button
         const settingsBtn = document.getElementById('settings-btn');
         if (settingsBtn) {
+            settingsBtn.addEventListener('pointerdown', () => {
+                prefetchSettingsPage().catch(() => {});
+            }, { once: true });
             settingsBtn.addEventListener('click', () => {
                 loadPage('src/settings/settings.html');
             });

@@ -44,13 +44,24 @@ async function fetchPage(url) {
     if (pageCache.has(url)) {
         return pageCache.get(url);
     }
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch page: ${response.statusText}`);
-    }
-    const text = await response.text();
-    pageCache.set(url, text);
-    return text;
+    const request = fetch(url).then(async response => {
+        if (!response.ok) {
+            throw new Error(`Failed to fetch page: ${response.statusText}`);
+        }
+        return response.text();
+    }).catch(error => {
+        pageCache.delete(url);
+        throw error;
+    });
+    pageCache.set(url, request);
+    return request;
+}
+
+export function prefetchSettingsPage() {
+    return Promise.all([
+        fetchPage('src/settings/settings.html'),
+        import('../settings/settings-shell.js')
+    ]);
 }
 
 function isIndexUrl(pageUrl) {
@@ -123,12 +134,6 @@ export async function loadPage(pageUrl) {
     const mainPage = document.getElementById('main-page');
     const subpageHost = document.getElementById('subpage-host');
 
-    if (mainPage) mainPage.style.display = 'none';
-    if (subpageHost) {
-        subpageHost.innerHTML = '';
-        subpageHost.style.display = '';
-    }
-
     try {
         const pageHtml = await fetchPage(pageUrl);
         const parser = new DOMParser();
@@ -142,6 +147,14 @@ export async function loadPage(pageUrl) {
         }
 
         subpageHost.innerHTML = newContent.innerHTML;
+
+        if (pageUrl.includes('settings.html')) {
+            const { initializeSettingsShell } = await import('../settings/settings-shell.js');
+            await initializeSettingsShell();
+        }
+
+        if (mainPage) mainPage.style.display = 'none';
+        subpageHost.style.display = '';
 
         // Apply current language to freshly injected HTML before page init runs
         import('./i18n.js').then(m => m.translatePage()).catch(() => {});
@@ -169,15 +182,6 @@ export async function loadPage(pageUrl) {
                 if (initializeProfileEditor) await initializeProfileEditor();
             } catch (e) {
                 console.error('Router: Error initializing profile editor:', e);
-            }
-        } else if (pageUrl.includes('settings.html')) {
-            try {
-                const { initializeSettings } = await import('../settings/settings.js');
-                if (initializeSettings) {
-                    initializeSettings().catch(e => console.error('Router: Settings init error:', e));
-                }
-            } catch (e) {
-                console.error('Router: Error importing settings page:', e);
             }
         }
     } catch (error) {

@@ -6285,7 +6285,7 @@ async function _preloadSettingsInternal() {
         }
 
         // Update cache with results
-        settingsCache.rea = reaSettings;
+        settingsCache.rea = reaSettings ? { ...reaSettings, ...pendingChanges.rea } : reaSettings;
         settingsCache.de1 = de1Settings;
         settingsCache.de1Advanced = de1AdvancedSettings;
         settingsCache.appInfo = appInfo;
@@ -6350,10 +6350,12 @@ function handleSettingsLanguageChange() {
 }
 
 // Initialize the settings page
-export async function initializeSettings() {
+export async function initializeSettings({ initialMainCategory = 'quickadjustments', initialCategory = null, initialReaChanges = {} } = {}) {
+    let pendingInitialCategory = initialCategory;
     resetPendingChanges();
     // Pre-seed cache from IDB backup for instant render, then fetch from network in background
     await preSeedFromIDB();
+    Object.entries(initialReaChanges).forEach(([key, value]) => updateReaSetting(key, value, false));
     preloadSettings().then(() => {
         if (activeSettingsCategory) updateSettingsContentArea(activeSettingsCategory);
     });
@@ -6454,7 +6456,10 @@ export async function initializeSettings() {
             }
 
             // After rendering subcategories, attempt to click the first one if it exists
-            const firstSubCategoryBtn = subCategoriesPanel?.querySelector('.settings-subnav-btn');
+            const firstSubCategoryBtn = Array.from(subCategoriesPanel?.querySelectorAll('.settings-subnav-btn') || [])
+                .find(button => button.dataset.category === pendingInitialCategory)
+                || subCategoriesPanel?.querySelector('.settings-subnav-btn');
+            pendingInitialCategory = null;
             if (firstSubCategoryBtn) {
                 firstSubCategoryBtn.click();
             } else {
@@ -6471,7 +6476,8 @@ export async function initializeSettings() {
     });
 
     // Initial load of settings content: Simulate a click on the first main category button
-    const firstMainCategoryBtn = document.querySelector('.settings-nav-btn');
+    const firstMainCategoryBtn = document.getElementById(`${initialMainCategory}-btn`)
+        || document.querySelector('.settings-nav-btn');
     if (firstMainCategoryBtn) {
         firstMainCategoryBtn.click();
     } else {
