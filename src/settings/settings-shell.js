@@ -1,7 +1,8 @@
 import * as ui from '../modules/ui.js';
-import { translatePage } from '../modules/i18n.js';
+import { getTranslation, translatePage } from '../modules/i18n.js';
 import { loadPage } from '../modules/router.js';
 import { isBengleMachine } from '../modules/machine.js';
+import { readSettingsLocation, writeSettingsLocation } from './settings-location.js';
 import {
     resetSettingsSession,
     saveSettingsData,
@@ -85,6 +86,9 @@ let currentCleanup = null;
 let activeMainCategory = 'quickadjustments';
 let renderSequence = 0;
 let legacyMounted = false;
+let searchTimer = null;
+let searchScrollTop = 0;
+let searchActive = false;
 
 function setActive(buttons, activeButton) {
     buttons.forEach(button => {
@@ -99,13 +103,10 @@ function availableSubcategories(mainCategory) {
     return (SETTINGS_TREE[mainCategory] || []).filter(([, , bengleOnly]) => !bengleOnly || isBengleMachine());
 }
 
-function renderSubcategories(mainCategory, searchTerm = '') {
+function renderSubcategories(mainCategory) {
     const panel = document.getElementById('sub-categories-panel');
     if (!panel) return;
-    const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
-    const items = availableSubcategories(mainCategory).filter(([name]) =>
-        !normalizedSearch || name.toLocaleLowerCase().includes(normalizedSearch)
-    );
+    const items = availableSubcategories(mainCategory);
     panel.innerHTML = `<ul class="space-y-1">${items.map(([name, category]) => {
         const prefix = name.match(/^(\d+\.\s*)/)?.[1] || '';
         const label = prefix ? name.slice(prefix.length) : name;
@@ -153,49 +154,136 @@ async function renderCategory(mainCategory, category) {
     }
 }
 
-function selectMainCategory(button, searchTerm = '') {
+function selectMainCategory(button, requestedCategory = null) {
     const mainCategory = button.id.replace(/-btn$/, '').replaceAll('-', '');
     activeMainCategory = mainCategory;
     setActive(Array.from(document.querySelectorAll('.settings-nav-btn')), button);
-    renderSubcategories(mainCategory, searchTerm);
-    const first = document.querySelector('#sub-categories-panel .settings-subnav-btn');
-    if (first) {
-        first.click();
+    renderSubcategories(mainCategory);
+    const subcategories = Array.from(document.querySelectorAll('#sub-categories-panel .settings-subnav-btn'));
+    const target = subcategories.find(item => item.dataset.category === requestedCategory) || subcategories[0];
+    if (target) {
+        target.click();
     } else {
         const content = document.getElementById('settings-content-area');
         if (content) content.innerHTML = '<div class="flex items-center justify-center h-full text-[28px] text-[var(--text-primary)]">No matching settings</div>';
     }
 }
 
+function clearSearchResults() {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+    const panel = document.getElementById('sub-categories-panel');
+    const results = panel?.querySelector('[data-settings-search-results]');
+    if (!panel || !results || !searchActive) return;
+    results.hidden = true;
+    results.replaceChildren();
+    Array.from(panel.children).forEach(child => {
+        if (child !== results) child.hidden = false;
+    });
+    panel.scrollTop = searchScrollTop;
+    searchActive = false;
+}
+
+function renderSearchResults(searchTerm) {
+    const panel = document.getElementById('sub-categories-panel');
+    if (!panel) return;
+    let results = panel.querySelector('[data-settings-search-results]');
+    if (!results) {
+        results = document.createElement('div');
+        results.dataset.settingsSearchResults = '';
+        results.className = 'flex flex-col gap-[8px]';
+        panel.appendChild(results);
+    }
+    if (!searchActive) {
+        searchScrollTop = panel.scrollTop;
+        Array.from(panel.children).forEach(child => {
+            if (child !== results) child.hidden = true;
+        });
+        searchActive = true;
+    }
+
+    const term = searchTerm.toLocaleLowerCase();
+    const fragment = document.createDocumentFragment();
+    Object.keys(SETTINGS_TREE).forEach(mainCategory => {
+        const mainButton = document.getElementById(`${mainCategory}-btn`);
+        const mainLabel = mainButton?.querySelector('span')?.textContent?.trim() || mainCategory;
+        const mainSourceLabel = mainButton?.querySelector('span')?.dataset.i18nKey || mainCategory;
+        const mainMatches = mainLabel.toLocaleLowerCase().includes(term)
+            || mainSourceLabel.toLocaleLowerCase().includes(term);
+        availableSubcategories(mainCategory).forEach(([name, category]) => {
+            const sourceLabel = name.replace(/^\d+\.\s*/, '');
+            const label = getTranslation(sourceLabel);
+            if (!mainMatches
+                && !sourceLabel.toLocaleLowerCase().includes(term)
+                && !label.toLocaleLowerCase().includes(term)) return;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'settings-search-result w-full text-left px-4 py-3 rounded-lg text-[22px] text-[var(--text-primary)] hover:bg-[#2c4a7a] hover:text-white flex items-center gap-[10px]';
+            button.dataset.mainCategory = mainCategory;
+            button.dataset.category = category;
+            button.textContent = `${mainLabel} \u203a ${label}`;
+            fragment.appendChild(button);
+        });
+    });
+    if (!fragment.childNodes.length) {
+        const empty = document.createElement('p');
+        empty.className = 'p-4 text-center text-[22px] text-[var(--text-primary)] opacity-60';
+        empty.textContent = getTranslation('No settings match your search');
+        fragment.appendChild(empty);
+    }
+    results.replaceChildren(fragment);
+    results.hidden = false;
+    panel.scrollTop = 0;
+}
+
 function bindShell(root) {
     root.addEventListener('click', event => {
         if (legacyMounted) return;
+        const searchResult = event.target.closest('.settings-search-result');
+        if (searchResult) {
+            const searchInput = document.getElementById('settings-search');
+            if (searchInput) searchInput.value = '';
+            clearSearchResults();
+            const mainButton = document.getElementById(`${searchResult.dataset.mainCategory}-btn`);
+            if (mainButton) selectMainCategory(mainButton, searchResult.dataset.category);
+            return;
+        }
         const mainButton = event.target.closest('.settings-nav-btn');
         if (mainButton) {
-            selectMainCategory(mainButton, document.getElementById('settings-search')?.value || '');
+            selectMainCategory(mainButton);
             return;
         }
         const subButton = event.target.closest('.settings-subnav-btn');
         if (subButton) {
             setActive(Array.from(document.querySelectorAll('.settings-subnav-btn')), subButton);
+            writeSettingsLocation(activeMainCategory, subButton.dataset.category);
             renderCategory(activeMainCategory, subButton.dataset.category);
         }
     });
 
-    document.getElementById('settings-search')?.addEventListener('input', event => {
+    const searchInput = document.getElementById('settings-search');
+    searchInput?.addEventListener('input', event => {
         if (legacyMounted) return;
         const term = event.target.value.trim().toLocaleLowerCase();
-        document.querySelectorAll('.settings-nav-btn').forEach(button => {
-            const mainCategory = button.id.replace(/-btn$/, '').replaceAll('-', '');
-            const matches = button.textContent.toLocaleLowerCase().includes(term)
-                || availableSubcategories(mainCategory).some(([name]) => name.toLocaleLowerCase().includes(term));
-            button.closest('li').style.display = !term || matches ? '' : 'none';
-        });
-        renderSubcategories(activeMainCategory, term);
+        clearTimeout(searchTimer);
+        if (!term) {
+            clearSearchResults();
+            return;
+        }
+        searchTimer = setTimeout(() => renderSearchResults(term), 125);
+    });
+    searchInput?.addEventListener('keydown', event => {
+        if (legacyMounted || event.key !== 'Enter') return;
+        event.preventDefault();
+        const term = event.currentTarget.value.trim();
+        if (term) renderSearchResults(term);
+        document.querySelector('[data-settings-search-results] .settings-search-result')?.click();
+        event.currentTarget.blur();
     });
 
     document.getElementById('cancel-settings-btn')?.addEventListener('click', () => {
         if (legacyMounted) return;
+        clearSearchResults();
         resetSettingsSession();
         loadPage('index.html');
     });
@@ -220,10 +308,16 @@ export async function initializeSettingsShell() {
     currentCleanup = null;
     activeMainCategory = 'quickadjustments';
     legacyMounted = false;
+    clearTimeout(searchTimer);
+    searchTimer = null;
+    searchScrollTop = 0;
+    searchActive = false;
     resetSettingsSession();
     startSettingsData();
     bindShell(root);
-    const first = document.getElementById('quickadjustments-btn') || document.querySelector('.settings-nav-btn');
-    if (first) selectMainCategory(first);
+    const saved = readSettingsLocation();
+    const first = document.getElementById(`${saved?.mainCategory || 'quickadjustments'}-btn`)
+        || document.querySelector('.settings-nav-btn');
+    if (first) selectMainCategory(first, saved?.category);
     translatePage();
 }

@@ -5,22 +5,13 @@ import { test } from 'node:test';
 import { pluginKeywords, pluginListKeywords, subcategoryMatches } from '../src/modules/settings-search.js';
 
 const source = readFileSync(new URL('../src/settings/settings.js', import.meta.url), 'utf8');
-const match = source.match(/function highlightMatch\(text, searchTerm\) \{[\s\S]*?\r?\n\}/);
-assert.ok(match);
-const highlightMatch = new Function(`${match[0]}\nreturn highlightMatch;`)();
 
-test('settings search highlights punctuation literally', () => {
-    const cases = [
-        ['Group (temperature)', '('],
-        ['Value [raw]', '['],
-        ['Path C:\\data', '\\'],
-        ['Version 1.2', '.'],
-    ];
-
-    for (const [text, term] of cases) {
-        const expected = text.replace(term, `<mark class="bg-yellow-300 text-black">${term}</mark>`);
-        assert.equal(highlightMatch(text, term), expected);
-    }
+test('settings search keeps navigation stable and waits for explicit activation', () => {
+    assert.doesNotMatch(source, /cloneNode\(/);
+    assert.doesNotMatch(source, /restoreOriginalNavigation|updateNavigationWithResults/);
+    assert.match(source, /dataset\.settingsSearchResults/);
+    assert.match(source, /setTimeout\(\(\) => renderResults\(searchTerm\), 125\)/);
+    assert.match(source, /event\.key !== 'Enter'/);
 });
 
 // The settings nav only knows page names, so searching for a setting used to
