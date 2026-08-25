@@ -7,8 +7,10 @@ const read = path => readFileSync(new URL(path, root), 'utf8');
 
 test('Plotly Basic is the only vendored Plotly build', () => {
     const index = read('index.html');
+    const loader = read('src/modules/vendor-loader.js');
     const basic = new URL('src/modules/plotly-basic-3.1.0.min.js', root);
-    assert.match(index, /src\/modules\/plotly-basic-3\.1\.0\.min\.js/);
+    assert.match(loader, /src\/modules\/plotly-basic-3\.1\.0\.min\.js/);
+    assert.doesNotMatch(index, /src\/modules\/plotly-basic-3\.1\.0\.min\.js/);
     assert.doesNotMatch(index, /src\/modules\/plotly-3\.1\.0\.min\.js/);
     assert.equal(existsSync(new URL('src/modules/plotly-3.1.0.min.js', root)), false);
     assert.equal(statSync(basic).size, 1_036_463);

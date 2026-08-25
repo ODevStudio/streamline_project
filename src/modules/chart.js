@@ -3,6 +3,7 @@ import { getTranslation } from './i18n.js';
 import { hasMachineGFlow, createScaleFlowResolver, createPourPhaseTracker } from './historical-gflow.js';
 import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions } from './chart-autoscale.js';
 import { createLatestTaskRunner } from './latest-task-runner.js';
+import { loadPlotly } from './vendor-loader.js';
 
 // Maps internal trace key → i18n key used for the chart label.
 const LABEL_KEYS = {
@@ -52,6 +53,8 @@ function getLiveLayoutUpdate(layout) {
 }
 
 async function drawPlotly({ element, traces, layout, config, mode, generation }) {
+    if (!element.isConnected || renderGenerations.get(element) !== generation) return;
+    const Plotly = await loadPlotly();
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     const requestedFullRevision = requestedFullRenderRevisions.get(element) || 0;
     const effectiveMode = mode !== 'live' || requestedFullRevision > (appliedFullRenderRevisions.get(element) || 0)
@@ -468,7 +471,7 @@ export function finalizeLiveChart() {
 // the plot area after the chart width changes (e.g. GHC column toggling).
 export function refreshLabelMargin() {
     const element = getChartElement();
-    if (!element) return;
+    if (!element?._fullLayout) return;
     // Hidden behind another page (e.g. settings, profile selector) -- skip the
     // Plotly.relayout below. It's a real, non-cheap layout op with zero
     // visible effect while hidden, and every streamline:languagechange fires

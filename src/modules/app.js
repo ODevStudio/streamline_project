@@ -23,7 +23,7 @@ import { isCupWarmerOn, readCupWarmerTarget, resolvePrewarm, getCupWarmerState, 
 import { openDB, setSetting } from './idb.js';
 import { openContextMenu } from './context-menu.js';
 import { shouldHandleMachineShortcut } from './machine-shortcut.js';
-import { loadStyle } from './vendor-loader.js';
+import { loadPlotly, loadStyle } from './vendor-loader.js';
 import { initHelpLauncher } from './help-launcher.js';
 
 window.app = { api, ui, chart };
@@ -1831,15 +1831,13 @@ async function initMainPageOnce() {
     if (mainPageInitPromise) return mainPageInitPromise;
     mainPageInitPromise = (async () => {
         logger.info('initMainPageOnce: starting.');
-        await history.initHistory();
-        resolveHistoryReady();
-        await profileManager.init();
+        const historyInit = history.initHistory().then(resolveHistoryReady);
+        await Promise.all([historyInit, profileManager.init()]);
         window.app.saveGrindToActiveProfile = (val) => profileManager.saveGrindToActiveProfile(val);
         window.app.saveContextToActiveProfile = (fields) => profileManager.saveContextToActiveProfile(fields);
         window.app.getActiveProfileRecord = () => profileManager.getActiveProfileRecord();
         const workflow = await loadInitialData();
         await initializeDe1Connection();
-        await initVisualizer();
         connectWebSocket(handleData, onMachineSnapshotSocketOpen);
         connectScaleWebSocket(handleScaleData, onScaleReconnect, onScaleDisconnect);
         connectDeviceWebSocket(handleDeviceWsData, () => {}, () => {}, handleDeviceConnectionError);
@@ -1857,6 +1855,7 @@ async function initMainPageOnce() {
         ensureGatewayModeTracking();
         resetDataTimeout();
         connectShotSettingsWebSocket(handleShotSettingsData);
+        void initVisualizer().catch(error => logger.error('Visualizer initialization failed:', error));
         mainPageInitialized = true;
         logger.info('initMainPageOnce: finished.');
         return workflow;
@@ -1957,6 +1956,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         logger.info('App DOMContentLoaded: Starting initialization.');
 
         initScaling();
+        if (!isSubPage()) requestAnimationFrame(() => loadPlotly().catch(error => logger.error('Plotly load failed:', error)));
         requestAnimationFrame(() => requestAnimationFrame(() => {
             ['numpad-modal.css', 'time-picker-modal.css', 'context-menu.css']
                 .forEach(file => loadStyle(`src/css/${file}`).catch(() => {}));

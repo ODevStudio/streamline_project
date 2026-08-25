@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 test('live chart frames use one paint-aligned update and defer while hidden', async () => {
-    const chartElement = { offsetParent: {}, clientWidth: 960, clientHeight: 390 };
-    const expandedElement = { offsetParent: {}, clientWidth: 1920, clientHeight: 1104 };
+    const chartElement = { offsetParent: {}, clientWidth: 960, clientHeight: 390, isConnected: true };
+    const expandedElement = { offsetParent: {}, clientWidth: 1920, clientHeight: 1104, isConnected: true };
     const expandedOverlay = { style: { display: 'none' } };
     const helpButton = { style: { display: '' } };
     const mainPage = {
@@ -46,6 +46,7 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
         Plots: { resize: () => {} },
         purge: () => {}
     };
+    windowTarget.Plotly = globalThis.Plotly;
 
     const chart = await import(`../src/modules/chart.js?live-render=${Date.now()}`);
     chart.initChart();

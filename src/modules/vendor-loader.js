@@ -47,3 +47,7 @@ export function loadEasyMDE() {
 export function loadIro() {
     return loadScript('src/vendor/iro.min.js', 'iro');
 }
+
+export function loadPlotly() {
+    return loadScript('src/modules/plotly-basic-3.1.0.min.js', 'Plotly');
+}

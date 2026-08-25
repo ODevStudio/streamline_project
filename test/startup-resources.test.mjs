@@ -10,6 +10,7 @@ test('route-only vendors and pages are absent from the startup preload list', ()
     assert.doesNotMatch(index, /rel="preload"/);
     assert.doesNotMatch(index, /<script[^>]+(?:easymde|iro\.min)/);
     assert.doesNotMatch(index, /<link[^>]+easymde\.min\.css/);
+    assert.doesNotMatch(index, /<script[^>]+plotly-basic/);
 });
 
 test('font faces use WOFF2 with swap and no browser TTF references', () => {
@@ -70,7 +71,23 @@ test('help implementation and route resources are deferred and cleaned up', () =
     assert.match(app, /import\('\.\/time-picker-modal\.js'\)/);
     assert.match(launcher, /import\('\.\/helpOverlay\.js'\)/);
     assert.match(router, /await cleanupSubpage\(\)/);
-    assert.match(chart, /export function cleanupSubpageChart/);
+    assert.match(chart, /export async function cleanupSubpageChart/);
+});
+
+test('Plotly loads after first paint only on chart-bearing routes', () => {
+    const app = read('src/modules/app.js');
+    const chart = read('src/modules/chart.js');
+    const loader = read('src/modules/vendor-loader.js');
+    assert.match(app, /if \(!isSubPage\(\)\) requestAnimationFrame\(\(\) => loadPlotly\(\)/);
+    assert.match(chart, /const Plotly = await loadPlotly\(\)/);
+    assert.match(loader, /loadScript\('src\/modules\/plotly-basic-3\.1\.0\.min\.js', 'Plotly'\)/);
+});
+
+test('core startup does not wait for Visualizer verification', () => {
+    const app = read('src/modules/app.js');
+    assert.doesNotMatch(app, /await initVisualizer\(\)/);
+    assert.match(app, /connectShotSettingsWebSocket\(handleShotSettingsData\);\s*void initVisualizer\(\)/);
+    assert.match(app, /Promise\.all\(\[historyInit, profileManager\.init\(\)\]\)/);
 });
 
 test('production startup logging is disabled', () => {
