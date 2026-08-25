@@ -26,7 +26,7 @@ test('process-lifetime chart and profile listeners use stable identities', () =>
     const chart = read('src/modules/chart.js');
     const profiles = read('src/modules/profile_selector.js');
     const settings = read('src/settings/settings.js');
-    assert.match(chart, /window\.addEventListener\('resize', handleChartWindowResize\)/);
+    assert.match(chart, /if \(!window\.ResizeObserver\) window\.addEventListener\('resize', handleChartWindowResize\)/);
     assert.match(chart, /document\.addEventListener\('streamline:languagechange', handleChartLanguageChange\)/);
     assert.match(profiles, /new WeakSet\(\)/);
     assert.match(profiles, /document\.addEventListener\('profiles-updated', handleProfilesUpdated\)/);

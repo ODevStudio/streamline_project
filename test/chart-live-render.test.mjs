@@ -43,6 +43,8 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     globalThis.cancelAnimationFrame = clearTimeout;
 
     const calls = [];
+    let blockNextExtend = false;
+    let releaseExtend = null;
     globalThis.Plotly = {
         react: async (element, traces) => {
             element.data = traces.map(trace => ({ ...trace, visible: true }));
@@ -55,6 +57,17 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
             });
         },
         update: async (element, data, layout) => calls.push({ method: 'update', element, lengths: data.x.map(values => values.length), layout }),
+        extendTraces: async (element, data, indices) => {
+            calls.push({ method: 'extendTraces', element, lengths: data.x.map(values => values.length), indices });
+            indices.forEach((index, position) => {
+                element.data[index].x.push(...data.x[position]);
+                element.data[index].y.push(...data.y[position]);
+            });
+            if (blockNextExtend) {
+                blockNextExtend = false;
+                await new Promise(resolve => { releaseExtend = resolve; });
+            }
+        },
         relayout: async (element, layout) => calls.push({ method: 'relayout', element, layout }),
         restyle: async (element, key, value) => {
             if (key === 'visible') element.data.forEach(trace => { trace.visible = value; });
@@ -89,21 +102,35 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     chart.updateChart(start, frame(3), 3);
     await new Promise(resolve => setTimeout(resolve, 20));
 
-    assert.equal(calls.filter(call => call.method === 'update').length, 1);
-    assert.deepEqual(calls.at(-1).lengths, [3, 3, 3, 3, 3, 3, 3]);
+    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 1);
+    assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [3, 3, 3, 3, 3, 3, 3]);
     assert.equal('paper_bgcolor' in calls.at(-1).layout, false);
     assert.deepEqual(calls.at(-1).layout['xaxis.range'].map(Math.round), [0, 3]);
 
     documentTarget.visibilityState = 'hidden';
     chart.updateChart(start, frame(4), 4);
     await new Promise(resolve => setTimeout(resolve, 120));
-    assert.equal(calls.filter(call => call.method === 'update').length, 1);
+    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 1);
 
     documentTarget.visibilityState = 'visible';
     documentTarget.dispatchEvent(new Event('visibilitychange'));
     await new Promise(resolve => setTimeout(resolve, 120));
-    assert.equal(calls.filter(call => call.method === 'update').length, 2);
-    assert.deepEqual(calls.at(-1).lengths, [4, 4, 4, 4, 4, 4, 4]);
+    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 2);
+    assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [1, 1, 1, 1, 1, 1, 1]);
+
+    blockNextExtend = true;
+    chart.updateChart(start, frame(5), 5);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    chart.updateChart(start, frame(6), 6);
+    chart.updateChart(start, frame(7), 7);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    releaseExtend();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const queuedMainUpdates = calls.filter(call => call.method === 'extendTraces' && call.element === chartElement).slice(-2);
+    assert.deepEqual(queuedMainUpdates.map(call => call.lengths), [
+        [1, 1, 1, 1, 1, 1, 1],
+        [2, 2, 2, 2, 2, 2, 2]
+    ]);
 
     chart.openExpandedChart();
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -121,11 +148,12 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(calls.some(call => call.method === 'relayout'), true);
 
-    chart.updateChart(start, frame(5), 5);
+    chart.updateChart(start, frame(8), 8);
     await new Promise(resolve => setTimeout(resolve, 120));
-    const expandedUpdates = calls.filter(call => call.method === 'update' && call.element === expandedElement);
+    const expandedUpdates = calls.filter(call => call.method === 'extendTraces' && call.element === expandedElement);
     assert.equal(expandedUpdates.length, 1);
     assert.equal(expandedUpdates[0].lengths.length, 9);
-    assert.deepEqual(expandedUpdates[0].layout['yaxis2.range'].map(value => Math.round(value * 10)), [83, 98]);
+    const expandedRelayout = calls.filter(call => call.method === 'relayout' && call.element === expandedElement).at(-1);
+    assert.deepEqual(expandedRelayout.layout['yaxis2.range'].map(value => Math.round(value * 10)), [83, 98]);
     chart.closeExpandedChart();
 });

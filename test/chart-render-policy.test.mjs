@@ -22,9 +22,10 @@ test('chart rendering uses supported traces and one topology-aware render path',
     assert.match(chart, /const CHART_REDRAW_INTERVAL_MS = 100/);
     assert.equal((chart.match(/Plotly\.react\(/g) || []).length, 1);
     assert.equal((chart.match(/Plotly\.update\(/g) || []).length, 1);
+    assert.equal((chart.match(/Plotly\.extendTraces\(/g) || []).length, 1);
     assert.match(chart, /traceCount !== traces\.length/);
     assert.match(chart, /renderMain\(chartTraces, layout, 'live'\)/);
-    assert.match(chart, /effectiveMode === 'live' \? getLiveLayoutUpdate\(layout\) : layout/);
+    assert.match(chart, /Plotly\.relayout\(element, getLiveLayoutUpdate\(layout\)\)/);
     assert.match(chart, /requestedFullRevision > \(appliedFullRenderRevisions\.get\(element\) \|\| 0\)/);
 });
 
@@ -41,8 +42,10 @@ test('live rendering is paint-aligned and skips hidden charts', () => {
 test('expanded mode renders only visible charts and restores a dirty main chart', () => {
     const chart = read('src/modules/chart.js');
     const index = read('index.html');
-    assert.match(chart, /MAIN_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: true \}/);
-    assert.match(chart, /EXPANDED_CHART_CONFIG = \{ displayModeBar: false, responsive: true, staticPlot: false \}/);
+    assert.match(chart, /MAIN_CHART_CONFIG = \{ displayModeBar: false, responsive: false, staticPlot: true \}/);
+    assert.match(chart, /EXPANDED_CHART_CONFIG = \{ displayModeBar: false, responsive: false, staticPlot: false \}/);
+    assert.match(chart, /Plotly\.extendTraces/);
+    assert.match(chart, /if \(element\) observeChartElement\(element\)/);
     assert.match(chart, /if \(!element \|\| element\.offsetParent === null \|\| expandedOpen\) \{\s*mainRenderDirty = true;\s*return;/);
     assert.match(chart, /if \(mainRenderDirty && latestMainRender && !expandedOpen\)/);
     assert.match(index, /id="expanded-chart"/);

@@ -25,9 +25,10 @@ const STEP_MARKER_COLORS = {
 };
 
 const CHART_REDRAW_INTERVAL_MS = 100;
-const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: true };
-const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: true, staticPlot: false };
+const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot: true };
+const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot: false };
 const renderedTraceCounts = new WeakMap();
+const renderedTraceLengths = new WeakMap();
 const renderQueues = new WeakMap();
 const renderGenerations = new WeakMap();
 const requestedFullRenderRevisions = new WeakMap();
@@ -62,19 +63,36 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
         : 'live';
     const traceCount = renderedTraceCounts.get(element);
     if (traceCount !== traces.length) {
-        await Plotly.react(element, traces, layout, config);
+        await Plotly.react(element, traces.map(trace => ({ ...trace, x: trace.x.slice(), y: trace.y.slice() })), layout, config);
         if (!element.isConnected || renderGenerations.get(element) !== generation) return;
         renderedTraceCounts.set(element, traces.length);
+        renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
         appliedFullRenderRevisions.set(element, requestedFullRevision);
         ensureExpandedInteractions(element);
         return;
     }
 
-    const x = traces.map((trace) => trace.x);
-    const y = traces.map((trace) => trace.y);
-    const dataUpdate = effectiveMode === 'live' ? { x, y } : {
-        x,
-        y,
+    if (effectiveMode === 'live') {
+        const lengths = renderedTraceLengths.get(element) || traces.map(() => 0);
+        const indices = traces.map((trace, index) => trace.x.length > lengths[index] ? index : -1).filter(index => index !== -1);
+        if (indices.length) {
+            const nextLengths = traces.map(trace => trace.x.length);
+            await Plotly.extendTraces(element, {
+                x: indices.map(index => traces[index].x.slice(lengths[index], nextLengths[index])),
+                y: indices.map(index => traces[index].y.slice(lengths[index], nextLengths[index]))
+            }, indices);
+            renderedTraceLengths.set(element, nextLengths);
+            if (!element.isConnected || renderGenerations.get(element) !== generation) return;
+        }
+        await Plotly.relayout(element, getLiveLayoutUpdate(layout));
+        if (!element.isConnected || renderGenerations.get(element) !== generation) return;
+        ensureExpandedInteractions(element);
+        return;
+    }
+
+    const dataUpdate = {
+        x: traces.map(trace => trace.x.slice()),
+        y: traces.map(trace => trace.y.slice()),
         name: traces.map((trace) => trace.name),
         mode: traces.map((trace) => trace.mode || 'lines'),
         hoverinfo: traces.map((trace) => trace.hoverinfo || 'name'),
@@ -85,11 +103,12 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
     await Plotly.update(
         element,
         dataUpdate,
-        effectiveMode === 'live' ? getLiveLayoutUpdate(layout) : layout,
+        layout,
         traces.map((_, index) => index)
     );
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-    if (effectiveMode !== 'live') appliedFullRenderRevisions.set(element, requestedFullRevision);
+    renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
+    appliedFullRenderRevisions.set(element, requestedFullRevision);
     ensureExpandedInteractions(element);
 }
 
@@ -100,6 +119,7 @@ function renderPlotly(element, traces, layout, config, mode = 'full') {
         renderGenerations.set(element, (renderGenerations.get(element) || 0) + 1);
         enqueue = createLatestTaskRunner(drawPlotly, (error) => {
             renderedTraceCounts.delete(element);
+            renderedTraceLengths.delete(element);
             logger.error('Chart render failed:', error);
         });
         renderQueues.set(element, enqueue);
@@ -118,6 +138,7 @@ async function disposePlotly(element) {
         if (window.Plotly) Plotly.purge(element);
     } finally {
         renderedTraceCounts.delete(element);
+        renderedTraceLengths.delete(element);
         requestedFullRenderRevisions.delete(element);
         appliedFullRenderRevisions.delete(element);
         renderGenerations.delete(element);
@@ -821,9 +842,10 @@ export function openExpandedChart() {
     if (help) { helpBtnPrevDisplay = help.style.display; help.style.display = 'none'; }
     // Plot after the browser has laid the containers out at real size.
     requestAnimationFrame(() => {
+        const element = document.getElementById('expanded-chart');
+        if (element) observeChartElement(element);
         renderExpandedCharts();
         requestAnimationFrame(() => {
-            const element = document.getElementById('expanded-chart');
             try { if (element) Plotly.Plots.resize(element); } catch (e) { /* not yet plotted */ }
         });
     });
@@ -837,6 +859,8 @@ export function closeExpandedChart() {
     if (help) help.style.display = helpBtnPrevDisplay;
     const element = document.getElementById('expanded-chart');
     if (element) void disposePlotly(element).catch(error => logger.error('Chart cleanup failed:', error));
+    const mainElement = getChartElement();
+    if (mainElement) observeChartElement(mainElement);
     flushMainRender();
 }
 
@@ -1491,12 +1515,12 @@ let chartResizeObserver = null;
 let chartLifecycleBound = false;
 
 function resizeChartElement(element) {
-    if (expandedOpen) {
-        renderExpandedCharts();
-        return;
-    }
     if (!element || element.offsetParent === null || !element.clientHeight || !element.clientWidth) return;
-    refreshLabelMargin();
+    void loadPlotly().then(Plotly => {
+        if (!element.isConnected || !element._fullLayout) return;
+        Plotly.Plots.resize(element);
+        if (!expandedOpen) refreshLabelMargin();
+    });
 }
 
 function handleChartWindowResize() {
@@ -1527,7 +1551,7 @@ function handleChartVisibilityChange() {
 
 function ensureChartLifecycle() {
     if (!chartLifecycleBound) {
-        window.addEventListener('resize', handleChartWindowResize);
+        if (!window.ResizeObserver) window.addEventListener('resize', handleChartWindowResize);
         window.addEventListener('storage', handleChartStorage);
         document.addEventListener('streamline:languagechange', handleChartLanguageChange);
         document.addEventListener('streamline:mainpagevisible', flushDeferredChart);
