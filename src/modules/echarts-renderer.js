@@ -244,6 +244,10 @@ export function renderChart(echarts, element, traces, layout, mode = 'full') {
     if (live) {
         const layoutChanged = state.liveLayoutSignature !== signature;
         state.chart.setOption({
+            animation: true,
+            animationDuration: 0,
+            animationDurationUpdate: 100,
+            animationEasingUpdate: 'linear',
             ...(layoutChanged ? axesOptions(layout, traces) : {}),
             series: liveSeriesOptions(traces, layout, layoutChanged)
         }, { notMerge: false, lazyUpdate: true, silent: true });
