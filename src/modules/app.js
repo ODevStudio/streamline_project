@@ -23,7 +23,8 @@ import { isCupWarmerOn, readCupWarmerTarget, resolvePrewarm, getCupWarmerState, 
 import { openDB, setSetting } from './idb.js';
 import { openContextMenu } from './context-menu.js';
 import { shouldHandleMachineShortcut } from './machine-shortcut.js';
-import { loadPlotly, loadStyle } from './vendor-loader.js';
+import { loadStyle } from './vendor-loader.js';
+import { loadECharts } from './echarts-loader.js';
 import { initHelpLauncher } from './help-launcher.js';
 
 window.app = { api, ui, chart };
@@ -1973,7 +1974,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         logger.info('App DOMContentLoaded: Starting initialization.');
 
         initScaling();
-        if (!isSubPage()) requestAnimationFrame(() => loadPlotly().catch(error => logger.error('Plotly load failed:', error)));
+        if (!isSubPage()) requestAnimationFrame(() => loadECharts().catch(error => logger.error('ECharts load failed:', error)));
         requestAnimationFrame(() => requestAnimationFrame(() => {
             ['numpad-modal.css', 'time-picker-modal.css', 'context-menu.css']
                 .forEach(file => loadStyle(`src/css/${file}`).catch(() => {}));

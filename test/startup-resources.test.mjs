@@ -74,13 +74,14 @@ test('help implementation and route resources are deferred and cleaned up', () =
     assert.match(chart, /export async function cleanupSubpageChart/);
 });
 
-test('Plotly loads after first paint only on chart-bearing routes', () => {
+test('ECharts loads after first paint only on chart-bearing routes', () => {
     const app = read('src/modules/app.js');
     const chart = read('src/modules/chart.js');
-    const loader = read('src/modules/vendor-loader.js');
-    assert.match(app, /if \(!isSubPage\(\)\) requestAnimationFrame\(\(\) => loadPlotly\(\)/);
-    assert.match(chart, /const Plotly = await loadPlotly\(\)/);
-    assert.match(loader, /loadScript\('src\/modules\/plotly-basic-3\.1\.0\.min\.js', 'Plotly'\)/);
+    const loader = read('src/modules/echarts-loader.js');
+    assert.match(app, /if \(!isSubPage\(\)\) requestAnimationFrame\(\(\) => loadECharts\(\)/);
+    assert.match(chart, /const echarts = await loadECharts\(\)/);
+    assert.match(loader, /requestAnimationFrame/);
+    assert.match(loader, /import\('\.\/echarts-streamline\.min\.js'\)/);
 });
 
 test('core startup does not wait for Visualizer verification', () => {

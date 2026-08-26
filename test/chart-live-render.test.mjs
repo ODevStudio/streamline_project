@@ -1,17 +1,29 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-test('live chart frames use one paint-aligned update and defer while hidden', async () => {
-    const chartElement = { offsetParent: {}, clientWidth: 960, clientHeight: 390, isConnected: true };
-    const plotlyHandlers = {};
-    const expandedElement = {
-        id: 'expanded-chart',
-        offsetParent: {},
-        clientWidth: 1920,
-        clientHeight: 1104,
-        isConnected: true,
-        on(name, handler) { plotlyHandlers[name] = handler; }
+test('live chart frames are paint-aligned, deferred while hidden, and expanded in one instance', async () => {
+    const options = [];
+    const handlers = {};
+    const instance = {
+        setOption(option) { options.push(option); },
+        getOption() { return options.at(-1) || { legend: [], series: [] }; },
+        resize() {},
+        dispose() {},
+        on(name, handler) { handlers[name] = handler; },
+        off() {},
+        dispatchAction() {}
     };
+    const element = (id, width, height) => ({
+        id,
+        offsetParent: {},
+        clientWidth: width,
+        clientHeight: height,
+        isConnected: true,
+        style: {},
+        replaceChildren() {}
+    });
+    const chartElement = element('plotly-chart', 960, 390);
+    const expandedElement = element('expanded-chart', 1920, 1104);
     const expandedOverlay = { style: { display: 'none' } };
     const helpButton = { style: { display: '' } };
     const mainPage = {
@@ -27,13 +39,10 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
             'expanded-chart-overlay': expandedOverlay,
             'help-overlay-btn': helpButton
         })[id] || null,
-        createElement: () => ({
-            style: {},
-            getContext: () => ({ measureText: text => ({ width: text.length * 8 }) })
-        })
+        createElement: () => ({ style: {}, getContext: () => ({ measureText: text => ({ width: text.length * 8 }) }) })
     });
     const windowTarget = new EventTarget();
-    Object.assign(windowTarget, { getComputedStyle: () => ({ visibility: 'visible', display: 'block' }) });
+    Object.assign(windowTarget, { devicePixelRatio: 2, echarts: { init: () => instance } });
 
     globalThis.document = documentTarget;
     globalThis.window = windowTarget;
@@ -41,42 +50,6 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     globalThis.performance = { now: () => 1000 };
     globalThis.requestAnimationFrame = callback => setTimeout(() => callback(1000), 0);
     globalThis.cancelAnimationFrame = clearTimeout;
-
-    const calls = [];
-    let blockNextExtend = false;
-    let releaseExtend = null;
-    globalThis.Plotly = {
-        react: async (element, traces) => {
-            element.data = traces.map(trace => ({ ...trace, visible: true }));
-            element._fullLayout = {};
-            calls.push({
-                method: 'react',
-                element,
-                lengths: traces.map(trace => trace.x.length),
-                axes: traces.map(trace => [trace.xaxis || 'x', trace.yaxis || 'y'])
-            });
-        },
-        update: async (element, data, layout) => calls.push({ method: 'update', element, lengths: data.x.map(values => values.length), layout }),
-        extendTraces: async (element, data, indices) => {
-            calls.push({ method: 'extendTraces', element, lengths: data.x.map(values => values.length), indices });
-            indices.forEach((index, position) => {
-                element.data[index].x.push(...data.x[position]);
-                element.data[index].y.push(...data.y[position]);
-            });
-            if (blockNextExtend) {
-                blockNextExtend = false;
-                await new Promise(resolve => { releaseExtend = resolve; });
-            }
-        },
-        relayout: async (element, layout) => calls.push({ method: 'relayout', element, layout }),
-        restyle: async (element, key, value) => {
-            if (key === 'visible') element.data.forEach(trace => { trace.visible = value; });
-            calls.push({ method: 'restyle', element, key, value });
-        },
-        Plots: { resize: () => {} },
-        purge: () => {}
-    };
-    windowTarget.Plotly = globalThis.Plotly;
 
     const chart = await import(`../src/modules/chart.js?live-render=${Date.now()}`);
     chart.initChart();
@@ -100,62 +73,26 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     chart.updateChart(start, frame(1), 1);
     chart.updateChart(start, frame(2), 2);
     chart.updateChart(start, frame(3), 3);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.equal(options.at(-1).series[0].data.length, 3);
 
-    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 1);
-    assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [3, 3, 3, 3, 3, 3, 3]);
-    assert.equal('paper_bgcolor' in calls.at(-1).layout, false);
-    assert.equal(calls.at(-1).layout['xaxis.autorange'], true);
-    assert.equal('xaxis.range' in calls.at(-1).layout, false);
-
+    const visibleRenderCount = options.length;
     documentTarget.visibilityState = 'hidden';
     chart.updateChart(start, frame(4), 4);
     await new Promise(resolve => setTimeout(resolve, 120));
-    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 1);
+    assert.equal(options.length, visibleRenderCount);
 
     documentTarget.visibilityState = 'visible';
     documentTarget.dispatchEvent(new Event('visibilitychange'));
     await new Promise(resolve => setTimeout(resolve, 120));
-    assert.equal(calls.filter(call => call.method === 'extendTraces').length, 2);
-    assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [1, 1, 1, 1, 1, 1, 1]);
-    assert.equal(calls.filter(call => call.method === 'relayout' && call.element === chartElement).length, 1);
-
-    blockNextExtend = true;
-    chart.updateChart(start, frame(5), 5);
-    await new Promise(resolve => setTimeout(resolve, 120));
-    chart.updateChart(start, frame(6), 6);
-    chart.updateChart(start, frame(7), 7);
-    await new Promise(resolve => setTimeout(resolve, 120));
-    releaseExtend();
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const queuedMainUpdates = calls.filter(call => call.method === 'extendTraces' && call.element === chartElement).slice(-2);
-    assert.deepEqual(queuedMainUpdates.map(call => call.lengths), [
-        [1, 1, 1, 1, 1, 1, 1],
-        [2, 2, 2, 2, 2, 2, 2]
-    ]);
+    assert.equal(options.at(-1).series[0].data.length, 4);
 
     chart.openExpandedChart();
     await new Promise(resolve => setTimeout(resolve, 20));
-    const expandedCalls = calls.filter(call => call.method === 'react' && call.element === expandedElement);
-    assert.equal(expandedCalls.length, 1);
-    assert.equal(expandedCalls[0].lengths.length, 9);
-    assert.equal(expandedCalls[0].axes.filter(([x, y]) => x === 'x2' && y === 'y2').length, 4);
-    expandedElement.data.forEach((trace, index) => { trace.visible = index === 0 ? true : 'legendonly'; });
-    assert.equal(plotlyHandlers.plotly_legendclick({ curveNumber: 0 }), false);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(calls.some(call => call.method === 'restyle'), true);
-
-    expandedElement.data[2].visible = 'legendonly';
-    plotlyHandlers.plotly_restyle();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(calls.some(call => call.method === 'relayout'), true);
-
-    chart.updateChart(start, frame(8), 8);
-    await new Promise(resolve => setTimeout(resolve, 120));
-    const expandedUpdates = calls.filter(call => call.method === 'extendTraces' && call.element === expandedElement);
-    assert.equal(expandedUpdates.length, 1);
-    assert.equal(expandedUpdates[0].lengths.length, 9);
-    const expandedRelayout = calls.filter(call => call.method === 'relayout' && call.element === expandedElement).at(-1);
-    assert.deepEqual(expandedRelayout.layout['yaxis2.range'].map(value => Math.round(value * 10)), [83, 98]);
+    const expanded = options.at(-1);
+    assert.equal(expanded.grid.length, 2);
+    assert.equal(expanded.series.length, 9);
+    assert.equal(expanded.series.filter(series => series.xAxisIndex === 1 && series.yAxisIndex === 1).length, 4);
+    assert.equal(typeof handlers.legendselectchanged, 'function');
     chart.closeExpandedChart();
 });

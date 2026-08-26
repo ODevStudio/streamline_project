@@ -3,7 +3,8 @@ import { getTranslation } from './i18n.js';
 import { hasMachineGFlow, createScaleFlowResolver, createPourPhaseTracker } from './historical-gflow.js';
 import { EXP_TOP_FLOOR, computeExpandedTopYMax, computeExpandedTempRange, separateLabelPositions, pickVisible } from './chart-autoscale.js';
 import { createLatestTaskRunner } from './latest-task-runner.js';
-import { loadPlotly } from './vendor-loader.js';
+import { loadECharts } from './echarts-loader.js';
+import { destroyChart, getSeriesVisibility, hasChart, onLegendChange, renderChart, resizeChart, selectSeries, setYAxisRange } from './echarts-renderer.js';
 
 // Maps internal trace key → i18n key used for the chart label.
 const LABEL_KEYS = {
@@ -25,123 +26,33 @@ const STEP_MARKER_COLORS = {
 };
 
 const CHART_REDRAW_INTERVAL_MS = 100;
-const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot: true };
-const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot: false };
-const renderedTraceCounts = new WeakMap();
-const renderedTraceLengths = new WeakMap();
-const renderedLiveLayouts = new WeakMap();
 const renderQueues = new WeakMap();
 const renderGenerations = new WeakMap();
-const requestedFullRenderRevisions = new WeakMap();
-const appliedFullRenderRevisions = new WeakMap();
-let fullRenderRevision = 0;
 let latestMainRender = null;
 let mainRenderDirty = false;
 let currentTheme = localStorage.getItem('theme') || 'light';
 
-function getLiveLayoutUpdate(element, layout) {
-    const previous = renderedLiveLayouts.get(element) || {};
-    const next = {
-        'xaxis.autorange': layout.xaxis?.autorange,
-        'xaxis.range': layout.xaxis?.range,
-        'xaxis.dtick': layout.xaxis?.dtick,
-        'yaxis.range': layout.yaxis?.range,
-        'xaxis2.autorange': layout.xaxis2?.autorange,
-        'xaxis2.range': layout.xaxis2?.range,
-        'xaxis2.dtick': layout.xaxis2?.dtick,
-        'yaxis2.range': layout.yaxis2?.range,
-        shapes: (layout.shapes || []).length,
-        annotations: (layout.annotations || []).length
-    };
-    renderedLiveLayouts.set(element, next);
-    return Object.fromEntries(Object.entries(next).flatMap(([key, value]) => {
-        if (JSON.stringify(value) === JSON.stringify(previous[key])) return [];
-        if (key === 'shapes' || key === 'annotations') return [[key, layout[key] || []]];
-        return value === undefined ? [] : [[key, value]];
-    }));
-}
-
-async function drawPlotly({ element, traces, layout, config, mode, generation }) {
+async function drawECharts({ element, traces, layout, interactive, mode, generation }) {
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-    const Plotly = await loadPlotly();
+    const echarts = await loadECharts();
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-    const requestedFullRevision = requestedFullRenderRevisions.get(element) || 0;
-    const effectiveMode = mode !== 'live' || requestedFullRevision > (appliedFullRenderRevisions.get(element) || 0)
-        ? 'full'
-        : 'live';
-    const traceCount = renderedTraceCounts.get(element);
-    if (traceCount !== traces.length) {
-        await Plotly.react(element, traces.map(trace => ({ ...trace, x: trace.x.slice(), y: trace.y.slice() })), layout, config);
-        if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-        renderedTraceCounts.set(element, traces.length);
-        renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
-        renderedLiveLayouts.delete(element);
-        appliedFullRenderRevisions.set(element, requestedFullRevision);
-        ensureExpandedInteractions(element);
-        return;
-    }
-
-    if (effectiveMode === 'live') {
-        const lengths = renderedTraceLengths.get(element) || traces.map(() => 0);
-        const indices = traces.map((trace, index) => trace.x.length > lengths[index] ? index : -1).filter(index => index !== -1);
-        if (indices.length) {
-            const nextLengths = traces.map(trace => trace.x.length);
-            await Plotly.extendTraces(element, {
-                x: indices.map(index => traces[index].x.slice(lengths[index], nextLengths[index])),
-                y: indices.map(index => traces[index].y.slice(lengths[index], nextLengths[index]))
-            }, indices);
-            renderedTraceLengths.set(element, nextLengths);
-            if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-        }
-        const layoutUpdate = getLiveLayoutUpdate(element, layout);
-        if (Object.keys(layoutUpdate).length) {
-            await Plotly.relayout(element, layoutUpdate);
-            if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-        }
-        ensureExpandedInteractions(element);
-        return;
-    }
-
-    const dataUpdate = {
-        x: traces.map(trace => trace.x.slice()),
-        y: traces.map(trace => trace.y.slice()),
-        name: traces.map((trace) => trace.name),
-        mode: traces.map((trace) => trace.mode || 'lines'),
-        hoverinfo: traces.map((trace) => trace.hoverinfo || 'name'),
-        'line.color': traces.map((trace) => trace.line?.color),
-        'line.dash': traces.map((trace) => trace.line?.dash || 'solid'),
-        'line.width': traces.map((trace) => trace.line?.width || 2)
-    };
-    await Plotly.update(
-        element,
-        dataUpdate,
-        layout,
-        traces.map((_, index) => index)
-    );
-    if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-    renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
-    renderedLiveLayouts.delete(element);
-    appliedFullRenderRevisions.set(element, requestedFullRevision);
+    renderChart(echarts, element, traces, layout, interactive, mode);
     ensureExpandedInteractions(element);
 }
 
-function renderPlotly(element, traces, layout, config, mode = 'full') {
-    if (mode !== 'live') requestedFullRenderRevisions.set(element, ++fullRenderRevision);
+function renderECharts(element, traces, layout, interactive, mode = 'full') {
     let enqueue = renderQueues.get(element);
     if (!enqueue) {
         renderGenerations.set(element, (renderGenerations.get(element) || 0) + 1);
-        enqueue = createLatestTaskRunner(drawPlotly, (error) => {
-            renderedTraceCounts.delete(element);
-            renderedTraceLengths.delete(element);
-            renderedLiveLayouts.delete(element);
+        enqueue = createLatestTaskRunner(drawECharts, (error) => {
             logger.error('Chart render failed:', error);
         });
         renderQueues.set(element, enqueue);
     }
-    enqueue({ element, traces, layout, config, mode, generation: renderGenerations.get(element) });
+    enqueue({ element, traces, layout, interactive, mode, generation: renderGenerations.get(element) });
 }
 
-async function disposePlotly(element) {
+async function disposeECharts(element) {
     const generation = (renderGenerations.get(element) || 0) + 1;
     renderGenerations.set(element, generation);
     const enqueue = renderQueues.get(element);
@@ -149,13 +60,8 @@ async function disposePlotly(element) {
     await enqueue?.dispose();
     if (renderGenerations.get(element) !== generation) return;
     try {
-        if (window.Plotly) Plotly.purge(element);
+        destroyChart(element);
     } finally {
-        renderedTraceCounts.delete(element);
-        renderedTraceLengths.delete(element);
-        renderedLiveLayouts.delete(element);
-        requestedFullRenderRevisions.delete(element);
-        appliedFullRenderRevisions.delete(element);
         renderGenerations.delete(element);
     }
 }
@@ -167,7 +73,7 @@ function renderMain(traces, layout, mode = 'full') {
         mainRenderDirty = true;
         return;
     }
-    renderPlotly(element, traces, layout, MAIN_CHART_CONFIG, mode);
+    renderECharts(element, traces, layout, false, mode);
     mainRenderDirty = false;
 }
 
@@ -481,7 +387,7 @@ function getAnnotations() {
 }
 
 // Apply current labels + restore default right margin. Use before
-// Plotly.newPlot / Plotly.react. No labels while a shot is live — only once
+// No labels while a shot is live — only once
 // it's done (see isLiveShot below).
 function applyLabelLayout(layout) {
     layout.annotations = isLiveShot ? [] : getAnnotations();
@@ -508,9 +414,9 @@ export function finalizeLiveChart() {
 // the plot area after the chart width changes (e.g. GHC column toggling).
 export function refreshLabelMargin() {
     const element = getChartElement();
-    if (!element?._fullLayout) return;
+    if (!element || !hasChart(element)) return;
     // Hidden behind another page (e.g. settings, profile selector) -- skip the
-    // Plotly.relayout below. It's a real, non-cheap layout op with zero
+    // A hidden layout refresh is non-cheap and has zero
     // visible effect while hidden, and every streamline:languagechange fires
     // this unconditionally regardless of which page is actually showing.
     if (element.offsetParent === null && !expandedOpen) return;
@@ -807,21 +713,19 @@ function expandedTopSeriesYs() {
 }
 
 function rescaleExpandedTop(element) {
-    if (!element?._fullLayout) return;
-    const visibility = element.data?.slice(0, 5).map(trace => trace.visible ?? true);
+    const visibility = getSeriesVisibility(element, 5);
+    if (!visibility) return;
     expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), 0);
-    void loadPlotly().then(Plotly => Plotly.relayout(element, { 'yaxis.range': [0, expandedTopYMax] }));
+    setYAxisRange(element, [0, expandedTopYMax]);
 }
 
 function ensureExpandedInteractions(element) {
-    if (element.id !== 'expanded-chart' || expandedInteractionElements.has(element) || typeof element.on !== 'function') return;
-    element.on('plotly_legendclick', event => {
-        const visibility = element.data.map(trace => trace.visible ?? true);
-        if (visibility[event.curveNumber] !== true || visibility.filter(value => value === true).length !== 1) return true;
-        void loadPlotly().then(Plotly => Plotly.restyle(element, 'visible', true));
-        return false;
+    if (element.id !== 'expanded-chart' || expandedInteractionElements.has(element) || !hasChart(element)) return;
+    const topNames = expandedTopTraces().map(trace => trace.name);
+    onLegendChange(element, event => {
+        if (!topNames.some(name => event.selected[name] !== false)) selectSeries(element, topNames);
+        rescaleExpandedTop(element);
     });
-    element.on('plotly_restyle', () => rescaleExpandedTop(element));
     expandedInteractionElements.add(element);
 }
 
@@ -830,10 +734,10 @@ function renderExpandedCharts(mode = 'full') {
     const element = document.getElementById('expanded-chart');
     if (!element) return;
     const theme = currentTheme;
-    const visibility = element.data?.slice(0, 5).map(trace => trace.visible ?? true);
+    const visibility = getSeriesVisibility(element, 5);
     expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), expandedTopYMax);
     const layout = expandedLayout(theme, [0, expandedTopYMax], expandedTemperatureRange());
-    renderPlotly(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, EXPANDED_CHART_CONFIG, mode);
+    renderECharts(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, true, mode);
 }
 
 export function isExpandedChartOpen() { return expandedOpen; }
@@ -852,9 +756,7 @@ export function openExpandedChart() {
         const element = document.getElementById('expanded-chart');
         if (element) observeChartElement(element);
         renderExpandedCharts();
-        requestAnimationFrame(() => {
-            try { if (element) Plotly.Plots.resize(element); } catch (e) { /* not yet plotted */ }
-        });
+        requestAnimationFrame(() => resizeChart(element));
     });
 }
 
@@ -865,7 +767,7 @@ export function closeExpandedChart() {
     const help = document.getElementById('help-overlay-btn');
     if (help) help.style.display = helpBtnPrevDisplay;
     const element = document.getElementById('expanded-chart');
-    if (element) void disposePlotly(element).catch(error => logger.error('Chart cleanup failed:', error));
+    if (element) void disposeECharts(element).catch(error => logger.error('Chart cleanup failed:', error));
     const mainElement = getChartElement();
     if (mainElement) observeChartElement(mainElement);
     flushMainRender();
@@ -1005,7 +907,7 @@ export function updateChart(shotStartTime, data, weight, weightFlow = null, filt
     scheduleChartFlush();
 }
 
-// Reset all chart data/tracking/layout state WITHOUT touching Plotly. Callers
+// Reset all chart data/tracking/layout state without touching the renderer. Callers
 // that redraw themselves right after (plotHistoricalShot) use this to avoid
 // painting an empty chart just to overwrite it.
 function resetChartState() {
@@ -1065,7 +967,7 @@ export function plotHistoricalShot(measurements, workflow = null) {
     }
 
     // Reset state only — we render once at the end, so skip clearChart's two
-    // throwaway Plotly redraws of an empty chart.
+    // throwaway redraws of an empty chart.
     resetChartState();
 
     let shotStartTime = null;
@@ -1522,11 +1424,8 @@ let chartLifecycleBound = false;
 
 function resizeChartElement(element) {
     if (!element || element.offsetParent === null || !element.clientHeight || !element.clientWidth) return;
-    void loadPlotly().then(Plotly => {
-        if (!element.isConnected || !element._fullLayout) return;
-        Plotly.Plots.resize(element);
-        if (!expandedOpen) refreshLabelMargin();
-    });
+    if (!resizeChart(element)) return;
+    if (!expandedOpen) refreshLabelMargin();
 }
 
 function handleChartWindowResize() {
@@ -1593,12 +1492,12 @@ export function initChart() {
     ensureChartLifecycle();
     observeChartElement(element);
 
-    // No Plotly.newPlot here: the CSS scaling pass (initScaling) hasn't run
+    // No initial render here: the CSS scaling pass (initScaling) hasn't run
     // yet at this point during boot, so drawing now would measure the
     // pre-scale container size and need a later resize to fix -- wasted
     // render at boot, and nothing currently corrects it automatically. The
     // first real draw (plotHistoricalShot / clearChart / plotProfile, all of
-    // which call Plotly.react and work fine as an initial draw) happens once
+    // which work fine as an initial draw) happens once
     // there's actual data to show, by which point scaling has settled.
 
 }
@@ -1613,7 +1512,7 @@ export async function cleanupSubpageChart(root) {
         observedChartElement = null;
         observedChartSize = { width: 0, height: 0 };
     }
-    await Promise.all([...root.querySelectorAll('#plotly-chart')].map(disposePlotly));
+    await Promise.all([...root.querySelectorAll('#plotly-chart')].map(disposeECharts));
 }
 
 export function setTheme(theme) {
