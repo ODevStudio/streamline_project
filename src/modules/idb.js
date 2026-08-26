@@ -31,20 +31,26 @@ function repairMissingSummarySeed() {
         const shotsStore = transaction.objectStore(SHOTS_STORE_NAME);
         const summariesStore = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME);
         let needed = false;
-        const count = summariesStore.count();
-        count.onsuccess = () => {
-            if (count.result > 0) return;
+        let shotCount;
+        let summaryCount;
+        const repair = () => {
+            if (shotCount === undefined || summaryCount === undefined) return;
+            needed = summaryCount < shotCount;
+            if (!needed || summaryCount > 0) return;
             const cursor = shotsStore.index('by_timestamp').openCursor(null, 'prev');
             let seeded = 0;
             cursor.onsuccess = event => {
                 const current = event.target.result;
                 if (!current || seeded >= SUMMARY_SEED_SIZE) return;
-                needed = true;
                 summariesStore.put(toShotSummary(current.value));
                 seeded += 1;
                 current.continue();
             };
         };
+        const shotsCountRequest = shotsStore.count();
+        const summariesCountRequest = summariesStore.count();
+        shotsCountRequest.onsuccess = () => { shotCount = shotsCountRequest.result; repair(); };
+        summariesCountRequest.onsuccess = () => { summaryCount = summariesCountRequest.result; repair(); };
         transaction.oncomplete = () => resolve(needed);
         transaction.onerror = event => reject(event.target.error);
     });
@@ -268,20 +274,26 @@ function toShotSummary(shot) {
     return summary;
 }
 
-export function getLatestShotSummaries(limit) {
+function getShotSummaryPage(storeName, limit, offset) {
     return new Promise((resolve, reject) => {
         if (!db) return reject('DB not open');
         if (limit <= 0) return resolve([]);
-        const transaction = db.transaction([SHOT_SUMMARIES_STORE_NAME], 'readonly');
-        const request = transaction.objectStore(SHOT_SUMMARIES_STORE_NAME)
+        const transaction = db.transaction([storeName], 'readonly');
+        const request = transaction.objectStore(storeName)
             .index('by_timestamp')
             .openCursor(null, 'prev');
         const summaries = [];
+        let advanced = offset === 0;
 
         request.onsuccess = (event) => {
             const cursor = event.target.result;
             if (!cursor || summaries.length >= limit) return resolve(summaries);
-            summaries.push(cursor.value);
+            if (!advanced) {
+                advanced = true;
+                cursor.advance(offset);
+                return;
+            }
+            summaries.push(storeName === SHOTS_STORE_NAME ? toShotSummary(cursor.value) : cursor.value);
             if (summaries.length >= limit) return resolve(summaries);
             cursor.continue();
         };
@@ -290,6 +302,14 @@ export function getLatestShotSummaries(limit) {
             reject('Error getting shot summaries.');
         };
     });
+}
+
+export function getLatestShotSummaries(limit, offset = 0) {
+    return getShotSummaryPage(SHOT_SUMMARIES_STORE_NAME, limit, offset);
+}
+
+export function getLatestCachedShotSummaries(limit, offset = 0) {
+    return getShotSummaryPage(SHOTS_STORE_NAME, limit, offset);
 }
 
 export function getShotSummaryCount() {

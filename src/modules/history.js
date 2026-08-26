@@ -1,7 +1,8 @@
 import * as chart from './chart.js';
 import { logger } from './logger.js';
-import { openDB, getLatestShotSummaries, getShotSummaryCount, getLatestCachedShot, getShot, addShot, addShots, deleteShot as idbDeleteShot, clearShots } from './idb.js';
+import { openDB, getLatestShotSummaries, getLatestCachedShotSummaries, getLatestCachedShot, getShot, addShot, addShots, deleteShot as idbDeleteShot, clearShots } from './idb.js';
 import { API_BASE_URL } from './api.js';
+import { createHistoryPager } from './history-pager.js';
 import { renderPastShot, clearShotData } from './shotData.js';
 import { getTranslation } from './i18n.js';
 import { translateProfileTitle } from './profileManager.js';
@@ -14,7 +15,7 @@ const DEREK_URL = 'https://derek.decentespresso.com/';
 const PAGE_SIZE = 20;
 let shots = [];
 let currentShotIndex = -1;
-let totalAvailable = 0;
+let historyHasMore = false;
 // id of the shot currently drawn on the chart -- lets displayShot() skip a
 // redundant redraw right after paintNewestShotFast() already drew this exact
 // shot during boot. Not touched by refreshCurrentShot(), which must always
@@ -74,47 +75,39 @@ async function paintNewestShotFast(alreadyPaintedId = null, alreadyPaintedShot =
     }
 }
 
-async function loadShotHistory() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/shots?limit=${PAGE_SIZE}&offset=0&order=desc`);
+const historyPager = createHistoryPager({
+    pageSize: PAGE_SIZE,
+    async fetchServerPage(offset, limit) {
+        const response = await fetch(`${API_BASE_URL}/shots?limit=${limit}&offset=${offset}&order=desc`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
-        totalAvailable = data.total ?? 0;
-        // One transaction/commit for the whole page instead of one per shot --
-        // addShot() in a loop was serializing up to PAGE_SIZE IDB round trips.
         await addShots(data.items ?? []);
-        logger.info(`${data.items?.length ?? 0} shots fetched from API.`);
-    } catch (error) {
-        logger.warn('Could not fetch shots from API, loading from cache:', error);
-    }
+        return data;
+    },
+    fetchSummaryPage: (offset, limit) => getLatestShotSummaries(limit, offset),
+    fetchCachedPage: (offset, limit) => getLatestCachedShotSummaries(limit, offset)
+});
 
-    try {
-        shots = await getLatestShotSummaries(PAGE_SIZE);
-        if (shots.length === 0) {
-            const cached = await getLatestCachedShot();
-            if (cached) shots = [cached];
-        }
-        totalAvailable = Math.max(totalAvailable, await getShotSummaryCount(), shots.length);
-        logger.info('Shot history loaded:', shots.length, 'shots');
-    } catch (error) {
-        logger.error('Error loading shots from IndexedDB:', error);
+function applyHistoryPage(page) {
+    const selectedId = shots[currentShotIndex]?.id;
+    shots = page.shots;
+    if (selectedId) currentShotIndex = shots.findIndex(shot => shot.id === selectedId);
+    historyHasMore = page.hasMore;
+    page.errors.forEach(error => logger.warn('Could not load shot history source:', error));
+}
+
+async function loadShotHistory() {
+    applyHistoryPage(await historyPager.initial());
+    if (shots.length === 0) {
+        const cached = await getLatestCachedShot();
+        if (cached) shots = historyPager.update(cached);
     }
+    logger.info('Shot history loaded:', shots.length, 'shots');
 }
 
 async function loadMoreShots() {
-    if (shots.length >= totalAvailable) return;
-    try {
-        const response = await fetch(`${API_BASE_URL}/shots?limit=${PAGE_SIZE}&offset=${shots.length}&order=desc`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        totalAvailable = data.total ?? totalAvailable;
-        const nextShots = data.items ?? [];
-        await addShots(nextShots);
-        shots = [...shots, ...nextShots];
-        logger.info(`Loaded ${data.items?.length ?? 0} more shots.`);
-    } catch (error) {
-        logger.warn('Could not load more shots:', error);
-    }
+    if (!historyHasMore) return;
+    applyHistoryPage(await historyPager.more());
 }
 
 async function loadFullShot(shot) {
@@ -161,7 +154,7 @@ async function displayShot(index) {
     if (historyLabelEl) {
         if (index === 0) {
             historyLabelEl.textContent = getTranslation('NEWEST');
-        } else if (index === shots.length - 1 && shots.length >= totalAvailable) {
+        } else if (index === shots.length - 1 && !historyHasMore) {
             historyLabelEl.textContent = getTranslation('OLDEST');
         } else {
             historyLabelEl.textContent = getTranslation('HISTORY');
@@ -196,18 +189,19 @@ async function displayShot(index) {
     if (!shots[index].measurements) {
         const fullShot = await loadFullShot(shot);
         if (currentShotIndex !== index || shots[index]?.id !== shot.id) return;
-        shots = shots.map((item, itemIndex) => itemIndex === index ? fullShot : item);
+        shots = historyPager.update(fullShot);
+        currentShotIndex = shots.findIndex(item => item.id === shot.id);
     }
 
-    if (shots[index].measurements) {
+    if (shots[currentShotIndex].measurements) {
         // Skip the redraw if paintNewestShotFast() already drew this exact
         // shot moments ago during boot -- same data, avoid a pointless second
         // the chart renderer.
         if (paintedShotId !== shot.id) {
-            chart.plotHistoricalShot(shots[index].measurements, shots[index].workflow);
+            chart.plotHistoricalShot(shots[currentShotIndex].measurements, shots[currentShotIndex].workflow);
             paintedShotId = shot.id;
         }
-        renderPastShot(shots[index]);
+        renderPastShot(shots[currentShotIndex]);
     } else {
         // No measurements, and the fetch above could not get any -- the record
         // is a list entry the server no longer has (a reset or re-pointed
@@ -226,14 +220,14 @@ async function displayShot(index) {
     const nextBtn = document.getElementById('history-next-btn');
 
     if (prevBtn) {
-        prevBtn.classList.toggle('invisible', currentShotIndex >= shots.length - 1 && shots.length >= totalAvailable);
+        prevBtn.classList.toggle('invisible', currentShotIndex >= shots.length - 1 && !historyHasMore);
     }
     if (nextBtn) {
         nextBtn.classList.toggle('invisible', currentShotIndex <= 0);
     }
 
     // Transparently prefetch next page when approaching the end
-    if (currentShotIndex >= shots.length - 3 && shots.length < totalAvailable) {
+    if (currentShotIndex >= shots.length - 3 && historyHasMore) {
         loadMoreShots();
     }
 
@@ -260,8 +254,9 @@ async function ensureCurrentShotMeasurements() {
     if (shot.measurements) return shot;
     const fullShot = await loadFullShot(shot);
     if (currentShotIndex !== index || shots[index]?.id !== shot.id) return null;
-    shots = shots.map((item, itemIndex) => itemIndex === index ? fullShot : item);
-    return shots[index];
+    shots = historyPager.update(fullShot);
+    currentShotIndex = shots.findIndex(item => item.id === shot.id);
+    return shots[currentShotIndex];
 }
 
 async function copyText(text) {
@@ -342,7 +337,7 @@ export async function initHistory() {
     prevBtn.onclick = async () => {
         if (currentShotIndex < shots.length - 1) {
             displayShot(currentShotIndex + 1);
-        } else if (shots.length < totalAvailable) {
+        } else if (historyHasMore) {
             await loadMoreShots();
             if (currentShotIndex < shots.length - 1) {
                 displayShot(currentShotIndex + 1);
@@ -408,7 +403,7 @@ export async function clearShotHistory() {
         await openDB();
         await clearShots();
         shots = [];
-        totalAvailable = 0;
+        historyHasMore = false;
         logger.info('Shot history cleared.');
         await loadShotHistory();
         if (shots.length > 0) {
@@ -449,8 +444,7 @@ export async function deleteCurrentShot() {
     const response = await fetch(`${API_BASE_URL}/shots/${shot.id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     await idbDeleteShot(shot.id);
-    shots.splice(currentShotIndex, 1);
-    totalAvailable--;
+    shots = historyPager.remove(shot.id);
     if (shots.length === 0) {
         chart.clearChart();
         clearShotData();
