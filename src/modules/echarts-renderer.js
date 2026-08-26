@@ -1,6 +1,35 @@
 const charts = new WeakMap();
 const DPR = 1.25;
 
+function attachHoverLabel(chart, element) {
+    const label = element.ownerDocument?.createElement('div');
+    if (!label) return null;
+    Object.assign(label.style, {
+        position: 'absolute',
+        display: 'none',
+        pointerEvents: 'none',
+        zIndex: '3',
+        transform: 'translate(8px, -100%)',
+        borderRadius: '2px',
+        padding: '2px 4px',
+        color: '#ffffff',
+        font: '12px Inter, sans-serif',
+        lineHeight: '16px'
+    });
+    (element.firstElementChild || element).append(label);
+    const hide = () => { label.style.display = 'none'; };
+    chart.on('mousemove', { seriesType: 'line' }, event => {
+        label.textContent = event.seriesName;
+        label.style.backgroundColor = event.color;
+        label.style.left = `${event.event.offsetX}px`;
+        label.style.top = `${event.event.offsetY}px`;
+        label.style.display = 'block';
+    });
+    chart.on('mouseout', { seriesType: 'line' }, hide);
+    chart.on('globalout', hide);
+    return label;
+}
+
 function sizeOf(element) {
     return {
         width: Math.max(1, Math.round(element.clientWidth)),
@@ -95,6 +124,7 @@ function seriesOptions(traces, layout) {
     const markedAxes = new Set();
     return traces.map((trace, index) => {
         const axisIndex = trace.xaxis === 'x2' || trace.yaxis === 'y2' ? 1 : 0;
+        const hoverable = trace.hoverinfo !== 'skip';
         const annotation = annotationFor(trace, layout);
         const markLine = markedAxes.has(axisIndex) ? undefined : markerData(layout, axisIndex);
         markedAxes.add(axisIndex);
@@ -109,7 +139,8 @@ function seriesOptions(traces, layout) {
             symbol: 'none',
             smooth: false,
             connectNulls: false,
-            silent: true,
+            silent: !hoverable,
+            triggerEvent: hoverable ? 'line' : false,
             clip: true,
             lineStyle: {
                 color: trace.line?.color,
@@ -233,6 +264,7 @@ export function renderChart(echarts, element, traces, layout, mode = 'full') {
             }),
             size
         };
+        state.hoverLabel = attachHoverLabel(state.chart, element);
         charts.set(element, state);
     } else if (size.width !== state.size.width || size.height !== state.size.height) {
         state.chart.resize({ ...size, silent: true });
@@ -273,6 +305,7 @@ export function destroyChart(element) {
     const state = charts.get(element);
     if (!state) return;
     state.chart.dispose();
+    state.hoverLabel?.remove();
     charts.delete(element);
 }
 

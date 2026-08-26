@@ -5,12 +5,16 @@ import { destroyChart, renderChart } from '../src/modules/echarts-renderer.js';
 
 test('renderer preserves Plotly geometry, line styling, markers, labels, and capped DPR', () => {
     const calls = [];
+    const handlers = {};
     let initOptions;
     let disposed = false;
+    let labelRemoved = false;
+    const label = { style: {}, remove: () => { labelRemoved = true; } };
     const chart = {
         setOption: (option, settings) => calls.push({ option, settings }),
         getOption: () => undefined,
         resize() {},
+        on: (event, query, callback) => { handlers[event] = callback || query; },
         dispose: () => { disposed = true; }
     };
     const echarts = {
@@ -23,11 +27,13 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
         clientWidth: 800,
         clientHeight: 400,
         style: {},
+        ownerDocument: { createElement: () => label },
+        append: child => { assert.equal(child, label); },
         replaceChildren() {}
     };
     const traces = [
-        { name: 'Pressure', x: [0, 1], y: [0, 8], line: { color: '#17c29a', width: 3 } },
-        { name: 'Target Pressure', x: [0, 1], y: [0, 9], line: { color: '#8fd3bf', width: 2, dash: 'dot' } }
+        { name: 'Pressure', x: [0, 1], y: [0, 8], line: { color: '#17c29a', width: 3 }, hoverinfo: 'name' },
+        { name: 'Target Pressure', x: [0, 1], y: [0, 9], line: { color: '#8fd3bf', width: 2, dash: 'dot' }, hoverinfo: 'skip' }
     ];
     const layout = {
         paper_bgcolor: '#0d0e14',
@@ -51,6 +57,10 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     assert.equal(option.xAxis[0].axisLabel.fontSize, 20);
     assert.equal(option.series[0].lineStyle.width, 3);
     assert.equal(option.series[0].itemStyle.color, '#17c29a');
+    assert.equal(option.series[0].silent, false);
+    assert.equal(option.series[0].triggerEvent, 'line');
+    assert.equal(option.series[1].silent, true);
+    assert.equal(option.series[1].triggerEvent, false);
     assert.equal(option.series[1].lineStyle.type, 'dotted');
     assert.equal(option.series[0].markLine.data[0].lineStyle.type, 'dashed');
     assert.deepEqual(option.series[0].markPoint.label.offset, [0, 4]);
@@ -63,8 +73,18 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     assert.equal(calls[1].option.legend, undefined);
     assert.deepEqual(Object.keys(calls[1].option.series[0]), ['id', 'data']);
 
+    handlers.mousemove({ seriesName: 'Pressure', color: '#17c29a', event: { offsetX: 120, offsetY: 80 } });
+    assert.equal(label.textContent, 'Pressure');
+    assert.equal(label.style.backgroundColor, '#17c29a');
+    assert.equal(label.style.left, '120px');
+    assert.equal(label.style.top, '80px');
+    assert.equal(label.style.display, 'block');
+    handlers.mouseout();
+    assert.equal(label.style.display, 'none');
+
     destroyChart(element);
     assert.equal(disposed, true);
+    assert.equal(labelRemoved, true);
 });
 
 test('expanded renderer uses two grids with synchronized time axes and mirrored markers', () => {
