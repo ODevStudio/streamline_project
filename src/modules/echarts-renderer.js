@@ -29,7 +29,7 @@ function axisOption(config = {}, font = {}, isX = false) {
         axisLabel: {
             color: font.color,
             fontFamily: 'Inter, sans-serif',
-            fontSize: 16,
+            fontSize: font.size || 16,
             showMaxLabel: !isX,
             formatter: value => tickText?.get(value) ?? `${value}${config.ticksuffix || ''}`
         },
@@ -85,8 +85,10 @@ function annotationFor(trace, layout) {
     if (last < 0) return null;
     const annotations = layout.annotations || [];
     const color = trace.line?.color?.toLowerCase();
-    return annotations.find(annotation => annotation.font?.color?.toLowerCase() === color)
-        || annotations.find(annotation => annotation.x === trace.x[last] && annotation.y === trace.y[last]);
+    const colorMatch = annotations.find(annotation => annotation.font?.color?.toLowerCase() === color);
+    if (colorMatch) return colorMatch;
+    const coordinateMatches = annotations.filter(annotation => annotation.x === trace.x[last] && annotation.y === trace.y[last]);
+    return coordinateMatches.length === 1 ? coordinateMatches[0] : null;
 }
 
 function seriesOptions(traces, layout, interactive) {
