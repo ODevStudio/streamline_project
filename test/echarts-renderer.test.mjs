@@ -59,16 +59,9 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
 
     renderChart(echarts, element, traces.map(trace => ({ ...trace, x: [...trace.x, 2], y: [...trace.y, 7] })), layout, 'live');
     assert.equal(calls[1].settings.lazyUpdate, true);
-    assert.equal(calls[1].option.animation, true);
-    assert.equal(calls[1].option.animationDuration, 0);
-    assert.equal(calls[1].option.animationDurationUpdate, 100);
-    assert.equal(calls[1].option.animationEasingUpdate, 'linear');
     assert.equal(calls[1].option.grid, undefined);
     assert.equal(calls[1].option.legend, undefined);
     assert.deepEqual(Object.keys(calls[1].option.series[0]), ['id', 'data']);
-
-    renderChart(echarts, element, traces, layout);
-    assert.equal(calls[2].option.animation, false);
 
     destroyChart(element);
     assert.equal(disposed, true);

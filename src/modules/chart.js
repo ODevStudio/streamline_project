@@ -26,6 +26,7 @@ const STEP_MARKER_COLORS = {
 };
 
 const CHART_REDRAW_INTERVAL_MS = 100;
+const LIVE_X_DATA_FRACTION = 0.93;
 const renderQueues = new WeakMap();
 const renderGenerations = new WeakMap();
 let latestMainRender = null;
@@ -406,6 +407,8 @@ export function finalizeLiveChart() {
     isLiveShot = false;
     const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
+    const { range: _range, ...xaxis } = layout.xaxis;
+    layout.xaxis = { ...xaxis, autorange: true };
     applyLabelLayout(layout);
     renderMain(chartTraces, layout);
 }
@@ -485,6 +488,10 @@ function dtickForTime(time) {
     return 30;
 }
 
+function liveXRange(time) {
+    return time > 0 ? [0, time / LIVE_X_DATA_FRACTION] : [-1, 1];
+}
+
 function flushChart() {
     if (!hasVisibleChart()) {
         liveRenderDirty = true;
@@ -500,7 +507,8 @@ function flushChart() {
     const { range: _range, ...liveXAxis } = layout.xaxis;
     layout.xaxis = {
         ...liveXAxis,
-        autorange: true,
+        range: liveXRange(pendingTime),
+        autorange: false,
         dtick: dtickValue
     };
     renderMain(chartTraces, layout, 'live');
@@ -640,7 +648,7 @@ function expandedShapes(theme) {
     ]);
 }
 
-function expandedLayout(theme, topRange, tempRange) {
+function expandedLayout(theme, topRange, tempRange, xRange) {
     const c = expandedAxisColors(theme);
     const ticks = expandedTemperatureTicks(tempRange);
     return {
@@ -650,7 +658,7 @@ function expandedLayout(theme, topRange, tempRange) {
         margin: { l: 70, r: 28, t: 88, b: 52, pad: 0 },
         xaxis: {
             gridcolor: c.grid, linecolor: c.line, tickcolor: c.line,
-            fixedrange: true, autorange: true, zeroline: false, domain: [0, 1], anchor: 'y'
+            fixedrange: true, range: xRange, autorange: !xRange, zeroline: false, domain: [0, 1], anchor: 'y'
         },
         yaxis: {
             gridcolor: c.grid, linecolor: c.line, tickcolor: c.line,
@@ -658,7 +666,7 @@ function expandedLayout(theme, topRange, tempRange) {
         },
         xaxis2: {
             gridcolor: c.grid, linecolor: c.line, tickcolor: c.line,
-            fixedrange: true, autorange: true, zeroline: false, domain: [0, 1], anchor: 'y2', matches: 'x',
+            fixedrange: true, range: xRange, autorange: !xRange, zeroline: false, domain: [0, 1], anchor: 'y2', matches: 'x',
             title: { text: 'seconds', font: { size: 15 } }
         },
         yaxis2: {
@@ -740,7 +748,7 @@ function renderExpandedCharts(mode = 'full') {
     const theme = currentTheme;
     const visibility = getSeriesVisibility(element, 5);
     expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), expandedTopYMax);
-    const layout = expandedLayout(theme, [0, expandedTopYMax], expandedTemperatureRange());
+    const layout = expandedLayout(theme, [0, expandedTopYMax], expandedTemperatureRange(), mode === 'live' ? liveXRange(pendingTime) : undefined);
     renderECharts(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, mode);
 }
 

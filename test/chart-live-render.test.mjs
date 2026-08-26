@@ -76,6 +76,7 @@ test('live chart frames are paint-aligned, deferred while hidden, and expanded i
     chart.updateChart(start, frame(3), 3);
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.equal(options.at(-1).series[0].data.length, 3);
+    assert.deepEqual([options.at(-1).xAxis[0].min, options.at(-1).xAxis[0].max], [0, 3 / 0.93]);
 
     const visibleRenderCount = options.length;
     documentTarget.visibilityState = 'hidden';
@@ -87,6 +88,11 @@ test('live chart frames are paint-aligned, deferred while hidden, and expanded i
     documentTarget.dispatchEvent(new Event('visibilitychange'));
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.equal(options.at(-1).series[0].data.length, 4);
+
+    chart.finalizeLiveChart();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(options.at(-1).animation, false);
+    assert.equal(options.at(-1).xAxis[0].max, null);
 
     chart.openExpandedChart();
     await new Promise(resolve => setTimeout(resolve, 20));
