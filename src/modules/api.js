@@ -105,7 +105,9 @@ const de1AdvancedSettingsCache = {
 const reatsettingscache = {
     data: null,
     timestamp: null,
-    TTL: 40000 // 40 seconds TTL
+    TTL: 40000,
+    inFlight: null,
+    generation: 0
 };
 
 
@@ -1392,19 +1394,30 @@ export async function getReaSettings() {
             return reatsettingscache.data;
         }
     }
-    try {
-        const response = await fetch(`${API_BASE_URL}/settings`);
-        if (!response.ok) {
-            throw new Error(`Failed to get Rea settings: ${response.statusText}`);
+    if (reatsettingscache.inFlight?.generation === reatsettingscache.generation) return reatsettingscache.inFlight.promise;
+    const generation = reatsettingscache.generation;
+    const promise = (async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/settings`);
+            if (!response.ok) {
+                throw new Error(`Failed to get Rea settings: ${response.statusText}`);
+            }
+            const data = await response.json();
+            if (generation === reatsettingscache.generation) {
+                reatsettingscache.data = data;
+                reatsettingscache.timestamp = Date.now();
+            }
+            return data;
+        } catch (error) {
+            logger.error("Error in getReaSettings:", error);
+            return null;
         }
-        const data = await response.json();
-        // Update the cache with new data
-        reatsettingscache.data = data;
-        reatsettingscache.timestamp = Date.now();
-        return data;
-    } catch (error) {
-        logger.error("Error in getReaSettings:", error);
-        return null; // Return null or a default settings object
+    })();
+    reatsettingscache.inFlight = { generation, promise };
+    try {
+        return await promise;
+    } finally {
+        if (reatsettingscache.inFlight?.promise === promise) reatsettingscache.inFlight = null;
     }
 }
 
@@ -1732,7 +1745,8 @@ export async function setReaSettings(settings) {
             const errorBody = await response.text();
             throw new Error(`Failed to set REA settings. Status: ${response.status}, Body: ${errorBody}`);
         }
-        reatsettingscache.timestamp = null; // expire, but keep data for the mid-flash and error fallbacks
+        reatsettingscache.generation += 1;
+        reatsettingscache.timestamp = null;
         logger.info('REA settings updated successfully:', settings);
     } catch (error) {
         logger.error('Error setting REA settings:', error);

@@ -22,6 +22,7 @@ test('offline history pages every cached summary', async () => {
     page = await pager.more();
     assert.equal(page.shots.length, 55);
     assert.deepEqual(page.shots.map(shot => shot.id), cached.map(shot => shot.id));
+    assert.equal(page.hasMore, false);
 });
 
 test('server and cache use independent offsets and merge duplicate ids', async () => {
@@ -72,4 +73,20 @@ test('simultaneous loads share one page request and retry the same server offset
     const pages = await Promise.all([first, second, third]);
     assert.equal(calls, 2);
     assert.equal(pages[0].shots.length, 1);
+});
+
+test('updated shots are not replaced by stale later pages', async () => {
+    const oldShot = { id: 'shot', timestamp: new Date(1000).toISOString(), title: 'old' };
+    let pageNumber = 0;
+    const pager = createHistoryPager({
+        pageSize: 1,
+        fetchServerPage: async () => ({ items: [], total: 0 }),
+        fetchSummaryPage: async () => pageNumber++ < 2 ? [oldShot] : [],
+        fetchCachedPage: async () => []
+    });
+
+    await pager.initial();
+    pager.update({ ...oldShot, title: 'new' });
+    const page = await pager.more();
+    assert.equal(page.shots[0].title, 'new');
 });

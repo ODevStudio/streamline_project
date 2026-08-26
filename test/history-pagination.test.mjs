@@ -18,6 +18,12 @@ test('history pages use one bulk summary write', () => {
     assert.doesNotMatch(idb, /deleteObjectStore\(EMAILS_STORE_NAME\)/);
 });
 
+test('history record changes stay synchronized with the pager', () => {
+    assert.match(history, /shots = historyPager\.update\(fastShot\)/);
+    assert.match(history, /shots = historyPager\.update\(\{ \.\.\.shots\[idx\], \.\.\.updated \}\)/);
+    assert.doesNotMatch(history, /shots\[0\] = fastShot/);
+});
+
 test('version 9 seeds and backfills summaries from version 8 shots', () => {
     assert.match(idb, /event\.oldVersion > 0 && event\.oldVersion < 9/);
     assert.match(idb, /seedShotSummaries\(shotsStore, shotSummariesStore\)/);

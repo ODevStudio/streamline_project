@@ -11,9 +11,10 @@ function mergeShots(existing, pages) {
 
 export function createHistoryPager({ pageSize, fetchServerPage, fetchSummaryPage, fetchCachedPage }) {
     let shots = [];
-    let server = { offset: 0, exhausted: false };
+    let server = { offset: 0, exhausted: false, failed: false };
     let summaries = { offset: 0, exhausted: false };
     let cached = { offset: 0, exhausted: false };
+    let updatedShots = new Map();
     let loadPromise = null;
 
     async function loadPage() {
@@ -32,8 +33,11 @@ export function createHistoryPager({ pageSize, fetchServerPage, fetchSummaryPage
             const offset = server.offset + items.length;
             server = {
                 offset,
-                exhausted: Number.isFinite(serverPage.total) ? offset >= serverPage.total : items.length < pageSize
+                exhausted: Number.isFinite(serverPage.total) ? offset >= serverPage.total : items.length < pageSize,
+                failed: false
             };
+        } else if (results[0].status === 'rejected') {
+            server = { ...server, failed: true };
         }
         if (results[1].status === 'fulfilled') {
             summaries = { offset: summaries.offset + summaryPage.length, exhausted: summaryPage.length < pageSize };
@@ -47,7 +51,8 @@ export function createHistoryPager({ pageSize, fetchServerPage, fetchSummaryPage
         }
 
         shots = mergeShots(shots, [summaryPage, cachedPage, serverPage?.items ?? []]);
-        return { shots: [...shots], hasMore: !server.exhausted || !summaries.exhausted || !cached.exhausted, errors };
+        shots = mergeShots(shots, [[...updatedShots.values()]]);
+        return { shots: [...shots], hasMore: (!server.exhausted && !server.failed) || !summaries.exhausted || !cached.exhausted, errors };
     }
 
     function load() {
@@ -58,15 +63,17 @@ export function createHistoryPager({ pageSize, fetchServerPage, fetchSummaryPage
     return {
         initial() {
             shots = [];
-            server = { offset: 0, exhausted: false };
+            server = { offset: 0, exhausted: false, failed: false };
             summaries = { offset: 0, exhausted: false };
             cached = { offset: 0, exhausted: false };
+            updatedShots = new Map();
             return load();
         },
         more: load,
-        hasMore: () => !server.exhausted || !summaries.exhausted || !cached.exhausted,
+        hasMore: () => (!server.exhausted && !server.failed) || !summaries.exhausted || !cached.exhausted,
         update(shot) {
             shots = mergeShots(shots, [[shot]]);
+            updatedShots = new Map([...updatedShots, [shot.id, shots.find(item => item.id === shot.id)]]);
             return [...shots];
         },
         remove(id) {
@@ -75,6 +82,7 @@ export function createHistoryPager({ pageSize, fetchServerPage, fetchSummaryPage
                 summaries = { ...summaries, offset: Math.max(0, summaries.offset - 1) };
                 cached = { ...cached, offset: Math.max(0, cached.offset - 1) };
             }
+            updatedShots = new Map([...updatedShots].filter(([shotId]) => shotId !== id));
             shots = shots.filter(shot => shot.id !== id);
             return [...shots];
         }

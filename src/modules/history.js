@@ -364,7 +364,7 @@ export async function initHistory() {
     // Reuse the already-fetched full record so displayShot() below skips its
     // own network fetch (and the paintedShotId guard skips the redraw too).
     if (fastShot && shots.length > 0 && shots[0].id === fastShot.id) {
-        shots[0] = fastShot;
+        shots = historyPager.update(fastShot);
     }
 
     if (shots.length > 0) {
@@ -433,8 +433,8 @@ export async function updateShot(id, updates) {
     const updated = await response.json();
     const idx = shots.findIndex(s => s.id === id);
     if (idx !== -1) {
-        shots = shots.map((shot, index) => index === idx ? { ...shot, ...updated } : shot);
-        await addShots([shots[idx]]);
+        shots = historyPager.update({ ...shots[idx], ...updated });
+        await addShots([shots.find(shot => shot.id === id)]);
     }
     return updated;
 }
