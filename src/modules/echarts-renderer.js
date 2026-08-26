@@ -162,7 +162,7 @@ function legendOptions(layout, traces, size, selected) {
     return legends;
 }
 
-function chartOption(traces, layout, interactive, size, selected) {
+function axesOptions(layout, traces) {
     const font = layout.font || {};
     let xAxes = [axisOption(layout.xaxis, font, true)];
     const yAxes = [axisOption(layout.yaxis, font, false)];
@@ -178,19 +178,47 @@ function chartOption(traces, layout, interactive, size, selected) {
         }
         if (Number.isFinite(min)) xAxes = xAxes.map(axis => ({ ...axis, min, max }));
     }
+    return { xAxis: xAxes, yAxis: yAxes };
+}
+
+function chartOption(traces, layout, interactive, size, selected) {
+    const font = layout.font || {};
     return {
         animation: false,
         backgroundColor: layout.paper_bgcolor || layout.plot_bgcolor || 'transparent',
         textStyle: { color: font.color, fontFamily: 'Inter, sans-serif', fontSize: font.size },
         grid: gridOptions(layout, size),
         legend: legendOptions(layout, traces, size, selected),
-        xAxis: xAxes,
-        yAxis: yAxes,
+        ...axesOptions(layout, traces),
         series: seriesOptions(traces, layout, interactive)
     };
 }
 
-export function renderChart(echarts, element, traces, layout, interactive = false) {
+function liveLayoutSignature(layout) {
+    return JSON.stringify({
+        xaxis: layout.xaxis,
+        yaxis: layout.yaxis,
+        xaxis2: layout.xaxis2,
+        yaxis2: layout.yaxis2,
+        shapes: layout.shapes
+    });
+}
+
+function liveSeriesOptions(traces, layout, includeMarkers) {
+    const markedAxes = new Set();
+    return traces.map((trace, index) => {
+        const axisIndex = trace.xaxis === 'x2' || trace.yaxis === 'y2' ? 1 : 0;
+        const firstOnAxis = !markedAxes.has(axisIndex);
+        markedAxes.add(axisIndex);
+        return {
+            id: `trace-${index}`,
+            data: trace.x.map((x, pointIndex) => [x, trace.y[pointIndex]]),
+            ...(includeMarkers && firstOnAxis ? { markLine: markerData(layout, axisIndex) || { data: [] } } : {})
+        };
+    });
+}
+
+export function renderChart(echarts, element, traces, layout, interactive = false, mode = 'full') {
     const size = sizeOf(element);
     let state = charts.get(element);
     element.style.background = layout.paper_bgcolor || layout.plot_bgcolor || 'transparent';
@@ -210,13 +238,24 @@ export function renderChart(echarts, element, traces, layout, interactive = fals
         state = { ...state, size };
         charts.set(element, state);
     }
-    const selected = Object.assign({}, ...(state.chart.getOption?.().legend || []).map(legend => legend.selected || {}));
-    state.chart.setOption(chartOption(traces, layout, interactive, size, selected), {
-        notMerge: false,
-        replaceMerge: ['series', 'grid', 'xAxis', 'yAxis', 'legend'],
-        lazyUpdate: false,
-        silent: true
-    });
+    const signature = liveLayoutSignature(layout);
+    const live = mode === 'live' && state.traceCount === traces.length;
+    if (live) {
+        const layoutChanged = state.liveLayoutSignature !== signature;
+        state.chart.setOption({
+            ...(layoutChanged ? axesOptions(layout, traces) : {}),
+            series: liveSeriesOptions(traces, layout, layoutChanged)
+        }, { notMerge: false, lazyUpdate: true, silent: true });
+    } else {
+        const selected = Object.assign({}, ...(state.chart.getOption?.().legend || []).map(legend => legend.selected || {}));
+        state.chart.setOption(chartOption(traces, layout, interactive, size, selected), {
+            notMerge: false,
+            replaceMerge: ['series', 'grid', 'xAxis', 'yAxis', 'legend'],
+            lazyUpdate: false,
+            silent: true
+        });
+    }
+    charts.set(element, { ...state, traceCount: traces.length, liveLayoutSignature: signature });
 }
 
 export function resizeChart(element) {
