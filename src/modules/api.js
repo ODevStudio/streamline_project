@@ -90,7 +90,8 @@ const de1SettingsCache = {
     data: null,
     timestamp: null,
     TTL: 60000,
-    inFlight: null
+    inFlight: null,
+    generation: 0
 };
 
 // Caching for DE1 advanced settings to improve performance when navigating to settings page
@@ -98,7 +99,8 @@ const de1AdvancedSettingsCache = {
     data: null,
     timestamp: null,
     TTL: 40000,
-    inFlight: null
+    inFlight: null,
+    generation: 0
 };
 const reatsettingscache = {
     data: null,
@@ -1549,8 +1551,9 @@ export async function getDe1Settings() {
         }
     }
 
-    if (de1SettingsCache.inFlight) return de1SettingsCache.inFlight;
-    de1SettingsCache.inFlight = (async () => {
+    if (de1SettingsCache.inFlight?.generation === de1SettingsCache.generation) return de1SettingsCache.inFlight.promise;
+    const generation = de1SettingsCache.generation;
+    const promise = (async () => {
         try {
             const response = await fetch(`${API_BASE_URL}/machine/settings`);
             if (!response.ok) {
@@ -1562,8 +1565,10 @@ export async function getDe1Settings() {
                 throw error;
             }
             const data = await response.json();
-            de1SettingsCache.data = data;
-            de1SettingsCache.timestamp = Date.now();
+            if (generation === de1SettingsCache.generation) {
+                de1SettingsCache.data = data;
+                de1SettingsCache.timestamp = Date.now();
+            }
             return data;
         } catch (error) {
             logger.error("Error in getDe1Settings:", error);
@@ -1572,10 +1577,11 @@ export async function getDe1Settings() {
             return null;
         }
     })();
+    de1SettingsCache.inFlight = { generation, promise };
     try {
-        return await de1SettingsCache.inFlight;
+        return await promise;
     } finally {
-        de1SettingsCache.inFlight = null;
+        if (de1SettingsCache.inFlight?.promise === promise) de1SettingsCache.inFlight = null;
     }
 }
 
@@ -1593,6 +1599,7 @@ export async function setDe1Settings(settings) {
             const errorBody = await response.text();
             throw new Error(`Failed to set DE1 settings. Status: ${response.status}, Body: ${errorBody}`);
         }
+        de1SettingsCache.generation += 1;
         de1SettingsCache.timestamp = null; // expire, but keep data for the mid-flash and error fallbacks
         logger.info('DE1 settings updated successfully:', settings);
     } catch (error) {
@@ -1622,8 +1629,9 @@ export async function getDe1AdvancedSettings() {
         }
     }
 
-    if (de1AdvancedSettingsCache.inFlight) return de1AdvancedSettingsCache.inFlight;
-    de1AdvancedSettingsCache.inFlight = (async () => {
+    if (de1AdvancedSettingsCache.inFlight?.generation === de1AdvancedSettingsCache.generation) return de1AdvancedSettingsCache.inFlight.promise;
+    const generation = de1AdvancedSettingsCache.generation;
+    const promise = (async () => {
         const controller = new AbortController();
         const timeoutMs = 20000;
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1642,8 +1650,10 @@ export async function getDe1AdvancedSettings() {
                 throw error;
             }
             const data = await response.json();
-            de1AdvancedSettingsCache.data = data;
-            de1AdvancedSettingsCache.timestamp = Date.now();
+            if (generation === de1AdvancedSettingsCache.generation) {
+                de1AdvancedSettingsCache.data = data;
+                de1AdvancedSettingsCache.timestamp = Date.now();
+            }
             return data;
         } catch (error) {
             clearTimeout(timeoutId);
@@ -1657,10 +1667,11 @@ export async function getDe1AdvancedSettings() {
             return null;
         }
     })();
+    de1AdvancedSettingsCache.inFlight = { generation, promise };
     try {
-        return await de1AdvancedSettingsCache.inFlight;
+        return await promise;
     } finally {
-        de1AdvancedSettingsCache.inFlight = null;
+        if (de1AdvancedSettingsCache.inFlight?.promise === promise) de1AdvancedSettingsCache.inFlight = null;
     }
 }
 
@@ -1678,6 +1689,7 @@ export async function setDe1AdvancedSettings(settings) {
             const errorBody = await response.text();
             throw new Error(`Failed to set DE1 advanced settings. Status: ${response.status}, Body: ${errorBody}`);
         }
+        de1AdvancedSettingsCache.generation += 1;
         de1AdvancedSettingsCache.timestamp = null; // expire, but keep data for the mid-flash and error fallbacks
         logger.info('DE1 advanced settings updated successfully:', settings);
     } catch (error) {
@@ -1695,6 +1707,8 @@ export async function resetDe1Settings() {
             const errorBody = await response.text();
             throw new Error(`Failed to reset DE1 settings. Status: ${response.status}, Body: ${errorBody}`);
         }
+        de1SettingsCache.generation += 1;
+        de1AdvancedSettingsCache.generation += 1;
         de1SettingsCache.timestamp = null; // expire, but keep data for the mid-flash and error fallbacks
         de1AdvancedSettingsCache.timestamp = null; // expire, but keep data for the mid-flash and error fallbacks
         logger.info('DE1 settings reset to defaults');

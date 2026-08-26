@@ -104,23 +104,26 @@ export function updateReaSetting(key, value) {
 
 export async function saveSettingsData() {
     if (Object.keys(pendingRea).length === 0) return;
-    const changes = pendingRea;
-    await setReaSettings(changes);
-    committedRea = Object.freeze({ ...state.rea });
-    pendingRea = Object.freeze({});
+    const sent = { ...pendingRea };
+    await setReaSettings(sent);
+    committedRea = Object.freeze({ ...committedRea, ...sent });
+    pendingRea = Object.freeze(Object.fromEntries(
+        Object.entries(pendingRea).filter(([key, value]) => !Object.is(sent[key], value))
+    ));
+    const savedRea = { ...committedRea };
     try {
         await openDB();
         const backup = await getSetting('settingsBackup');
         await Promise.all([
-            setSetting('settings-rea', state.rea),
+            setSetting('settings-rea', savedRea),
             setSetting('settingsBackup', {
                 ...(backup || {}),
                 ts: Date.now(),
-                rea: { ...state.rea }
+                rea: savedRea
             })
         ]);
     } catch (error) {
         console.warn('Settings backup write failed:', error);
     }
-    publish({ ...state });
+    publish({ ...state, rea: Object.freeze({ ...committedRea, ...pendingRea }) });
 }
