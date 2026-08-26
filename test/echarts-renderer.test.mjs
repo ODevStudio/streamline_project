@@ -99,3 +99,33 @@ test('expanded renderer uses two grids with synchronized time axes and mirrored 
     assert.equal(option.series[1].markLine.data[0].xAxis, 4);
     destroyChart(element);
 });
+
+test('legend visibility survives renderer updates', () => {
+    let current = { legend: [] };
+    const chart = {
+        setOption: option => { current = option; },
+        getOption: () => current,
+        resize() {},
+        dispose() {}
+    };
+    const element = { clientWidth: 800, clientHeight: 400, style: {}, replaceChildren() {} };
+    const traces = [
+        { name: 'Pressure', x: [0, 1], y: [0, 8], line: { color: '#17c29a' } },
+        { name: 'Flow', x: [0, 1], y: [0, 4], line: { color: '#0358cf' } }
+    ];
+    const layout = {
+        font: { color: '#606579', size: 18 },
+        xaxis: {},
+        yaxis: { range: [0, 12] },
+        showlegend: true,
+        legend: { orientation: 'h', y: 1, font: { size: 20 } }
+    };
+
+    globalThis.window = { devicePixelRatio: 1 };
+    renderChart({ init: () => chart }, element, traces, layout, true);
+    current.legend[0].selected = { Pressure: false, Flow: true };
+    renderChart({ init: () => chart }, element, traces, layout, true);
+
+    assert.deepEqual(current.legend[0].selected, { Pressure: false, Flow: true });
+    destroyChart(element);
+});

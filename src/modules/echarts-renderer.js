@@ -139,7 +139,7 @@ function seriesOptions(traces, layout, interactive) {
     });
 }
 
-function legendOptions(layout, traces, size) {
+function legendOptions(layout, traces, size, selected) {
     if (!layout.showlegend) return [{ show: false }];
     const margin = layout.margin || {};
     const font = layout.font || {};
@@ -147,6 +147,7 @@ function legendOptions(layout, traces, size) {
     const makeLegend = (config, names) => ({
         show: true,
         data: names,
+        selected,
         left: margin.l || 50,
         top: Math.max(0, (margin.t || 0) + (1 - config.y) * innerHeight - (config.yanchor === 'bottom' ? config.font?.size || 20 : 0)),
         orient: config.orientation === 'h' ? 'horizontal' : 'vertical',
@@ -161,7 +162,7 @@ function legendOptions(layout, traces, size) {
     return legends;
 }
 
-function chartOption(traces, layout, interactive, size) {
+function chartOption(traces, layout, interactive, size, selected) {
     const font = layout.font || {};
     let xAxes = [axisOption(layout.xaxis, font, true)];
     const yAxes = [axisOption(layout.yaxis, font, false)];
@@ -182,7 +183,7 @@ function chartOption(traces, layout, interactive, size) {
         backgroundColor: layout.paper_bgcolor || layout.plot_bgcolor || 'transparent',
         textStyle: { color: font.color, fontFamily: 'Inter, sans-serif', fontSize: font.size },
         grid: gridOptions(layout, size),
-        legend: legendOptions(layout, traces, size),
+        legend: legendOptions(layout, traces, size, selected),
         xAxis: xAxes,
         yAxis: yAxes,
         series: seriesOptions(traces, layout, interactive)
@@ -209,7 +210,8 @@ export function renderChart(echarts, element, traces, layout, interactive = fals
         state = { ...state, size };
         charts.set(element, state);
     }
-    state.chart.setOption(chartOption(traces, layout, interactive, size), {
+    const selected = Object.assign({}, ...(state.chart.getOption?.().legend || []).map(legend => legend.selected || {}));
+    state.chart.setOption(chartOption(traces, layout, interactive, size, selected), {
         notMerge: false,
         replaceMerge: ['series', 'grid', 'xAxis', 'yAxis', 'legend'],
         lazyUpdate: false,
