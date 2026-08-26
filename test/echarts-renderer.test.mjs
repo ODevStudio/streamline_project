@@ -58,3 +58,44 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     destroyChart(element);
     assert.equal(disposed, true);
 });
+
+test('expanded renderer uses two grids with synchronized time axes and mirrored markers', () => {
+    let option;
+    const chart = {
+        setOption: value => { option = value; },
+        resize() {},
+        dispose() {}
+    };
+    const element = { clientWidth: 1920, clientHeight: 1104, style: {}, replaceChildren() {} };
+    const traces = [
+        { name: 'Pressure', x: [1, 7], y: [1, 8], line: { color: '#17c29a' } },
+        { name: 'Group C', x: [2, 6], y: [8, 9], xaxis: 'x2', yaxis: 'y2', line: { color: '#ff97a1' } }
+    ];
+    const axis = { autorange: true, gridcolor: '#eee', linecolor: '#999', tickcolor: '#999' };
+    const layout = {
+        font: { color: '#606579', size: 18 },
+        margin: { l: 70, r: 28, t: 88, b: 52 },
+        xaxis: { ...axis },
+        yaxis: { ...axis, domain: [0.46, 1], range: [0, 12], autorange: false },
+        xaxis2: { ...axis, matches: 'x' },
+        yaxis2: { ...axis, domain: [0, 0.30], range: [8, 9.5], autorange: false },
+        shapes: [
+            { xref: 'x', x0: 4, line: { color: '#777', width: 2, dash: 'longdash' } },
+            { xref: 'x2', x0: 4, line: { color: '#777', width: 2, dash: 'longdash' } }
+        ],
+        showlegend: true,
+        legend: { orientation: 'h', y: 1.04, yanchor: 'bottom', font: { size: 26 } },
+        legend2: { orientation: 'h', y: 0.37, yanchor: 'bottom', font: { size: 26 } }
+    };
+
+    globalThis.window = { devicePixelRatio: 1 };
+    renderChart({ init: () => chart }, element, traces, layout, true);
+
+    assert.equal(option.grid.length, 2);
+    assert.equal(option.legend.length, 2);
+    assert.deepEqual([option.xAxis[0].min, option.xAxis[0].max], [1, 7]);
+    assert.deepEqual([option.xAxis[1].min, option.xAxis[1].max], [1, 7]);
+    assert.equal(option.series[0].markLine.data[0].xAxis, 4);
+    assert.equal(option.series[1].markLine.data[0].xAxis, 4);
+    destroyChart(element);
+});

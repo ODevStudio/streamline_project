@@ -163,10 +163,20 @@ function legendOptions(layout, traces, size) {
 
 function chartOption(traces, layout, interactive, size) {
     const font = layout.font || {};
-    const xAxes = [axisOption(layout.xaxis, font, true)];
+    let xAxes = [axisOption(layout.xaxis, font, true)];
     const yAxes = [axisOption(layout.yaxis, font, false)];
     if (layout.xaxis2) xAxes.push({ ...axisOption(layout.xaxis2, font, true), gridIndex: 1 });
     if (layout.yaxis2) yAxes.push({ ...axisOption(layout.yaxis2, font, false), gridIndex: 1 });
+    if (layout.xaxis2?.matches === 'x' && layout.xaxis?.autorange && layout.xaxis2.autorange) {
+        let min = Infinity;
+        let max = -Infinity;
+        for (const trace of traces) for (const value of trace.x) {
+            if (!Number.isFinite(value)) continue;
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
+        if (Number.isFinite(min)) xAxes = xAxes.map(axis => ({ ...axis, min, max }));
+    }
     return {
         animation: false,
         backgroundColor: layout.paper_bgcolor || layout.plot_bgcolor || 'transparent',
