@@ -25,7 +25,7 @@ test('chart rendering uses supported traces and one topology-aware render path',
     assert.equal((chart.match(/Plotly\.extendTraces\(/g) || []).length, 1);
     assert.match(chart, /traceCount !== traces\.length/);
     assert.match(chart, /renderMain\(chartTraces, layout, 'live'\)/);
-    assert.match(chart, /Plotly\.relayout\(element, getLiveLayoutUpdate\(layout\)\)/);
+    assert.match(chart, /const layoutUpdate = getLiveLayoutUpdate\(element, layout\)/);
     assert.match(chart, /requestedFullRevision > \(appliedFullRenderRevisions\.get\(element\) \|\| 0\)/);
 });
 

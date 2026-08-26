@@ -105,7 +105,8 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     assert.equal(calls.filter(call => call.method === 'extendTraces').length, 1);
     assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [3, 3, 3, 3, 3, 3, 3]);
     assert.equal('paper_bgcolor' in calls.at(-1).layout, false);
-    assert.deepEqual(calls.at(-1).layout['xaxis.range'].map(Math.round), [0, 3]);
+    assert.equal(calls.at(-1).layout['xaxis.autorange'], true);
+    assert.equal('xaxis.range' in calls.at(-1).layout, false);
 
     documentTarget.visibilityState = 'hidden';
     chart.updateChart(start, frame(4), 4);
@@ -117,6 +118,7 @@ test('live chart frames use one paint-aligned update and defer while hidden', as
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.equal(calls.filter(call => call.method === 'extendTraces').length, 2);
     assert.deepEqual(calls.filter(call => call.method === 'extendTraces').at(-1).lengths, [1, 1, 1, 1, 1, 1, 1]);
+    assert.equal(calls.filter(call => call.method === 'relayout' && call.element === chartElement).length, 1);
 
     blockNextExtend = true;
     chart.updateChart(start, frame(5), 5);

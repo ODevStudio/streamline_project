@@ -29,6 +29,7 @@ const MAIN_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot
 const EXPANDED_CHART_CONFIG = { displayModeBar: false, responsive: false, staticPlot: false };
 const renderedTraceCounts = new WeakMap();
 const renderedTraceLengths = new WeakMap();
+const renderedLiveLayouts = new WeakMap();
 const renderQueues = new WeakMap();
 const renderGenerations = new WeakMap();
 const requestedFullRenderRevisions = new WeakMap();
@@ -38,19 +39,26 @@ let latestMainRender = null;
 let mainRenderDirty = false;
 let currentTheme = localStorage.getItem('theme') || 'light';
 
-function getLiveLayoutUpdate(layout) {
-    return {
+function getLiveLayoutUpdate(element, layout) {
+    const previous = renderedLiveLayouts.get(element) || {};
+    const next = {
         'xaxis.autorange': layout.xaxis?.autorange,
-        ...(layout.xaxis?.range ? { 'xaxis.range': layout.xaxis.range } : {}),
-        ...(layout.xaxis?.dtick !== undefined ? { 'xaxis.dtick': layout.xaxis.dtick } : {}),
+        'xaxis.range': layout.xaxis?.range,
+        'xaxis.dtick': layout.xaxis?.dtick,
         'yaxis.range': layout.yaxis?.range,
-        ...(layout.xaxis2 ? { 'xaxis2.autorange': layout.xaxis2.autorange } : {}),
-        ...(layout.xaxis2?.range ? { 'xaxis2.range': layout.xaxis2.range } : {}),
-        ...(layout.xaxis2?.dtick !== undefined ? { 'xaxis2.dtick': layout.xaxis2.dtick } : {}),
-        ...(layout.yaxis2?.range ? { 'yaxis2.range': layout.yaxis2.range } : {}),
-        shapes: layout.shapes || [],
-        annotations: layout.annotations || []
+        'xaxis2.autorange': layout.xaxis2?.autorange,
+        'xaxis2.range': layout.xaxis2?.range,
+        'xaxis2.dtick': layout.xaxis2?.dtick,
+        'yaxis2.range': layout.yaxis2?.range,
+        shapes: (layout.shapes || []).length,
+        annotations: (layout.annotations || []).length
     };
+    renderedLiveLayouts.set(element, next);
+    return Object.fromEntries(Object.entries(next).flatMap(([key, value]) => {
+        if (JSON.stringify(value) === JSON.stringify(previous[key])) return [];
+        if (key === 'shapes' || key === 'annotations') return [[key, layout[key] || []]];
+        return value === undefined ? [] : [[key, value]];
+    }));
 }
 
 async function drawPlotly({ element, traces, layout, config, mode, generation }) {
@@ -67,6 +75,7 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
         if (!element.isConnected || renderGenerations.get(element) !== generation) return;
         renderedTraceCounts.set(element, traces.length);
         renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
+        renderedLiveLayouts.delete(element);
         appliedFullRenderRevisions.set(element, requestedFullRevision);
         ensureExpandedInteractions(element);
         return;
@@ -84,8 +93,11 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
             renderedTraceLengths.set(element, nextLengths);
             if (!element.isConnected || renderGenerations.get(element) !== generation) return;
         }
-        await Plotly.relayout(element, getLiveLayoutUpdate(layout));
-        if (!element.isConnected || renderGenerations.get(element) !== generation) return;
+        const layoutUpdate = getLiveLayoutUpdate(element, layout);
+        if (Object.keys(layoutUpdate).length) {
+            await Plotly.relayout(element, layoutUpdate);
+            if (!element.isConnected || renderGenerations.get(element) !== generation) return;
+        }
         ensureExpandedInteractions(element);
         return;
     }
@@ -108,6 +120,7 @@ async function drawPlotly({ element, traces, layout, config, mode, generation })
     );
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     renderedTraceLengths.set(element, traces.map(trace => trace.x.length));
+    renderedLiveLayouts.delete(element);
     appliedFullRenderRevisions.set(element, requestedFullRevision);
     ensureExpandedInteractions(element);
 }
@@ -120,6 +133,7 @@ function renderPlotly(element, traces, layout, config, mode = 'full') {
         enqueue = createLatestTaskRunner(drawPlotly, (error) => {
             renderedTraceCounts.delete(element);
             renderedTraceLengths.delete(element);
+            renderedLiveLayouts.delete(element);
             logger.error('Chart render failed:', error);
         });
         renderQueues.set(element, enqueue);
@@ -139,6 +153,7 @@ async function disposePlotly(element) {
     } finally {
         renderedTraceCounts.delete(element);
         renderedTraceLengths.delete(element);
+        renderedLiveLayouts.delete(element);
         requestedFullRenderRevisions.delete(element);
         appliedFullRenderRevisions.delete(element);
         renderGenerations.delete(element);
@@ -521,7 +536,6 @@ export function refreshLabelMargin() {
     const rangeMax = rangeMaxForLabels(dataMax);
     layout.xaxis = { ...layout.xaxis, range: [0, rangeMax], autorange: false };
     renderMain(chartTraces, layout);
-    appliedRangeMax = rangeMax;
 }
 
 // Helper function to add vertical lines for substate changes and annotations
@@ -565,11 +579,6 @@ function dtickForTime(time) {
     return 30;
 }
 
-// The x-range grows continuously — exact label-inflated max, relayouted every
-// flush (v0.1.65 behavior): the right edge glides with the line instead of
-// jumping in steps. Discrete on-demand growth was tried and read as jumpy.
-let appliedRangeMax = null; // last applied range end
-
 function flushChart() {
     if (!hasVisibleChart()) {
         liveRenderDirty = true;
@@ -579,18 +588,16 @@ function flushChart() {
 
     const theme = currentTheme;
     const dtickValue = dtickForTime(pendingTime);
-    const rangeMax = rangeMaxForLabels(pendingTime);
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     isLiveShot = true;
     applyLabelLayout(layout);
+    const { range: _range, ...liveXAxis } = layout.xaxis;
     layout.xaxis = {
-        ...layout.xaxis,
-        range: [0, rangeMax],
-        autorange: false,
+        ...liveXAxis,
+        autorange: true,
         dtick: dtickValue
     };
     renderMain(chartTraces, layout, 'live');
-    appliedRangeMax = rangeMax;
     if (expandedOpen) renderExpandedCharts('live');
     liveRenderDirty = false;
 }
@@ -1023,7 +1030,6 @@ function resetChartState() {
     cancelChartFlush();
     lastRedrawAt = 0;
     liveRenderDirty = false;
-    appliedRangeMax = null;
     isLiveShot = false;
     resetExpandedData();
 
