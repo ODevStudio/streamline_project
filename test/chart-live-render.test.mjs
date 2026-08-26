@@ -4,12 +4,13 @@ import { test } from 'node:test';
 test('live chart frames are paint-aligned, deferred while hidden, and expanded in one instance', async () => {
     const options = [];
     const handlers = {};
+    let legendBindings = 0;
     const instance = {
         setOption(option) { options.push(option); },
         getOption() { return options.at(-1) || { legend: [], series: [] }; },
         resize() {},
         dispose() {},
-        on(name, handler) { handlers[name] = handler; },
+        on(name, handler) { handlers[name] = handler; if (name === 'legendselectchanged') legendBindings++; },
         off() {},
         dispatchAction() {}
     };
@@ -94,5 +95,10 @@ test('live chart frames are paint-aligned, deferred while hidden, and expanded i
     assert.equal(expanded.series.length, 9);
     assert.equal(expanded.series.filter(series => series.xAxisIndex === 1 && series.yAxisIndex === 1).length, 4);
     assert.equal(typeof handlers.legendselectchanged, 'function');
+    chart.closeExpandedChart();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    chart.openExpandedChart();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(legendBindings, 2);
     chart.closeExpandedChart();
 });

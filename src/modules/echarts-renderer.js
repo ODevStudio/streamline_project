@@ -31,7 +31,7 @@ function axisOption(config = {}, font = {}, isX = false) {
             fontFamily: 'Inter, sans-serif',
             fontSize: font.size || 16,
             showMaxLabel: !isX,
-            formatter: value => tickText?.get(value) ?? `${value}${config.ticksuffix || ''}`
+            formatter: value => tickText?.get(value) ?? (tickText ? `${Math.round(value * 10)}°` : `${value}${config.ticksuffix || ''}`)
         },
         axisLine: { show: true, lineStyle: { color: config.linecolor } },
         axisTick: { show: true, lineStyle: { color: config.tickcolor } },
@@ -91,7 +91,7 @@ function annotationFor(trace, layout) {
     return coordinateMatches.length === 1 ? coordinateMatches[0] : null;
 }
 
-function seriesOptions(traces, layout, interactive) {
+function seriesOptions(traces, layout) {
     const markedAxes = new Set();
     return traces.map((trace, index) => {
         const axisIndex = trace.xaxis === 'x2' || trace.yaxis === 'y2' ? 1 : 0;
@@ -109,14 +109,15 @@ function seriesOptions(traces, layout, interactive) {
             symbol: 'none',
             smooth: false,
             connectNulls: false,
-            silent: !interactive,
+            silent: true,
             clip: true,
             lineStyle: {
                 color: trace.line?.color,
                 width: trace.line?.width || 2,
                 type: dashType(trace.line?.dash)
             },
-            emphasis: { disabled: !interactive },
+            itemStyle: { color: trace.line?.color },
+            emphasis: { disabled: true },
             markLine,
             markPoint: annotation ? {
                 silent: true,
@@ -181,7 +182,7 @@ function axesOptions(layout, traces) {
     return { xAxis: xAxes, yAxis: yAxes };
 }
 
-function chartOption(traces, layout, interactive, size, selected) {
+function chartOption(traces, layout, size, selected) {
     const font = layout.font || {};
     return {
         animation: false,
@@ -190,7 +191,7 @@ function chartOption(traces, layout, interactive, size, selected) {
         grid: gridOptions(layout, size),
         legend: legendOptions(layout, traces, size, selected),
         ...axesOptions(layout, traces),
-        series: seriesOptions(traces, layout, interactive)
+        series: seriesOptions(traces, layout)
     };
 }
 
@@ -218,7 +219,7 @@ function liveSeriesOptions(traces, layout, includeMarkers) {
     });
 }
 
-export function renderChart(echarts, element, traces, layout, interactive = false, mode = 'full') {
+export function renderChart(echarts, element, traces, layout, mode = 'full') {
     const size = sizeOf(element);
     let state = charts.get(element);
     element.style.background = layout.paper_bgcolor || layout.plot_bgcolor || 'transparent';
@@ -247,8 +248,8 @@ export function renderChart(echarts, element, traces, layout, interactive = fals
             series: liveSeriesOptions(traces, layout, layoutChanged)
         }, { notMerge: false, lazyUpdate: true, silent: true });
     } else {
-        const selected = Object.assign({}, ...(state.chart.getOption?.().legend || []).map(legend => legend.selected || {}));
-        state.chart.setOption(chartOption(traces, layout, interactive, size, selected), {
+        const selected = Object.assign({}, ...(state.chart.getOption?.()?.legend || []).map(legend => legend.selected || {}));
+        state.chart.setOption(chartOption(traces, layout, size, selected), {
             notMerge: false,
             replaceMerge: ['series', 'grid', 'xAxis', 'yAxis', 'legend'],
             lazyUpdate: false,
@@ -262,6 +263,7 @@ export function resizeChart(element) {
     const state = charts.get(element);
     if (!state) return false;
     const size = sizeOf(element);
+    if (size.width === state.size.width && size.height === state.size.height) return true;
     state.chart.resize({ ...size, silent: true });
     charts.set(element, { ...state, size });
     return true;

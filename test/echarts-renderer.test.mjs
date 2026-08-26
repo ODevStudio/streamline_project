@@ -9,6 +9,7 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     let disposed = false;
     const chart = {
         setOption: (option, settings) => calls.push({ option, settings }),
+        getOption: () => undefined,
         resize() {},
         dispose: () => { disposed = true; }
     };
@@ -49,13 +50,14 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     assert.equal(option.animation, false);
     assert.equal(option.xAxis[0].axisLabel.fontSize, 20);
     assert.equal(option.series[0].lineStyle.width, 3);
+    assert.equal(option.series[0].itemStyle.color, '#17c29a');
     assert.equal(option.series[1].lineStyle.type, 'dotted');
     assert.equal(option.series[0].markLine.data[0].lineStyle.type, 'dashed');
     assert.deepEqual(option.series[0].markPoint.label.offset, [0, 4]);
     assert.equal(option.series[1].markPoint, undefined);
     assert.equal(calls[0].settings.lazyUpdate, false);
 
-    renderChart(echarts, element, traces.map(trace => ({ ...trace, x: [...trace.x, 2], y: [...trace.y, 7] })), layout, false, 'live');
+    renderChart(echarts, element, traces.map(trace => ({ ...trace, x: [...trace.x, 2], y: [...trace.y, 7] })), layout, 'live');
     assert.equal(calls[1].settings.lazyUpdate, true);
     assert.equal(calls[1].option.grid, undefined);
     assert.equal(calls[1].option.legend, undefined);
@@ -95,7 +97,7 @@ test('expanded renderer uses two grids with synchronized time axes and mirrored 
     };
 
     globalThis.window = { devicePixelRatio: 1 };
-    renderChart({ init: () => chart }, element, traces, layout, true);
+    renderChart({ init: () => chart }, element, traces, layout);
 
     assert.equal(option.grid.length, 2);
     assert.equal(option.legend.length, 2);
@@ -128,9 +130,9 @@ test('legend visibility survives renderer updates', () => {
     };
 
     globalThis.window = { devicePixelRatio: 1 };
-    renderChart({ init: () => chart }, element, traces, layout, true);
+    renderChart({ init: () => chart }, element, traces, layout);
     current.legend[0].selected = { Pressure: false, Flow: true };
-    renderChart({ init: () => chart }, element, traces, layout, true);
+    renderChart({ init: () => chart }, element, traces, layout);
 
     assert.deepEqual(current.legend[0].selected, { Pressure: false, Flow: true });
     destroyChart(element);

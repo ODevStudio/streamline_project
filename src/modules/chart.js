@@ -32,15 +32,15 @@ let latestMainRender = null;
 let mainRenderDirty = false;
 let currentTheme = localStorage.getItem('theme') || 'light';
 
-async function drawECharts({ element, traces, layout, interactive, mode, generation }) {
+async function drawECharts({ element, traces, layout, mode, generation }) {
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
     const echarts = await loadECharts();
     if (!element.isConnected || renderGenerations.get(element) !== generation) return;
-    renderChart(echarts, element, traces, layout, interactive, mode);
+    renderChart(echarts, element, traces, layout, mode);
     ensureExpandedInteractions(element);
 }
 
-function renderECharts(element, traces, layout, interactive, mode = 'full') {
+function renderECharts(element, traces, layout, mode = 'full') {
     let enqueue = renderQueues.get(element);
     if (!enqueue) {
         renderGenerations.set(element, (renderGenerations.get(element) || 0) + 1);
@@ -49,7 +49,7 @@ function renderECharts(element, traces, layout, interactive, mode = 'full') {
         });
         renderQueues.set(element, enqueue);
     }
-    enqueue({ element, traces, layout, interactive, mode, generation: renderGenerations.get(element) });
+    enqueue({ element, traces, layout, mode, generation: renderGenerations.get(element) });
 }
 
 async function disposeECharts(element) {
@@ -73,7 +73,7 @@ function renderMain(traces, layout, mode = 'full') {
         mainRenderDirty = true;
         return;
     }
-    renderECharts(element, traces, layout, false, mode);
+    renderECharts(element, traces, layout, mode);
     mainRenderDirty = false;
 }
 
@@ -700,7 +700,7 @@ function expandedTempTraces() {
     return traces;
 }
 
-const expandedInteractionElements = new WeakSet();
+const expandedInteractionCallbacks = new WeakMap();
 
 function expandedTopSeriesYs() {
     return [
@@ -720,13 +720,17 @@ function rescaleExpandedTop(element) {
 }
 
 function ensureExpandedInteractions(element) {
-    if (element.id !== 'expanded-chart' || expandedInteractionElements.has(element) || !hasChart(element)) return;
-    const topNames = expandedTopTraces().map(trace => trace.name);
-    onLegendChange(element, event => {
-        if (!topNames.some(name => event.selected[name] !== false)) selectSeries(element, topNames);
-        rescaleExpandedTop(element);
-    });
-    expandedInteractionElements.add(element);
+    if (element.id !== 'expanded-chart' || !hasChart(element)) return;
+    let callback = expandedInteractionCallbacks.get(element);
+    if (!callback) {
+        callback = event => {
+            const topNames = expandedTopTraces().map(trace => trace.name);
+            if (!topNames.some(name => event.selected[name] !== false)) selectSeries(element, topNames);
+            rescaleExpandedTop(element);
+        };
+        expandedInteractionCallbacks.set(element, callback);
+    }
+    onLegendChange(element, callback);
 }
 
 function renderExpandedCharts(mode = 'full') {
@@ -737,7 +741,7 @@ function renderExpandedCharts(mode = 'full') {
     const visibility = getSeriesVisibility(element, 5);
     expandedTopYMax = computeExpandedTopYMax(pickVisible(expandedTopSeriesYs(), visibility), expandedTopYMax);
     const layout = expandedLayout(theme, [0, expandedTopYMax], expandedTemperatureRange());
-    renderECharts(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, true, mode);
+    renderECharts(element, [...expandedTopTraces(), ...expandedTempTraces()], layout, mode);
 }
 
 export function isExpandedChartOpen() { return expandedOpen; }
