@@ -121,13 +121,10 @@ function annotationFor(trace, layout) {
 }
 
 function seriesOptions(traces, layout) {
-    const markedAxes = new Set();
     return traces.map((trace, index) => {
         const axisIndex = trace.xaxis === 'x2' || trace.yaxis === 'y2' ? 1 : 0;
         const hoverable = trace.hoverinfo !== 'skip';
         const annotation = annotationFor(trace, layout);
-        const markLine = markedAxes.has(axisIndex) ? undefined : markerData(layout, axisIndex);
-        markedAxes.add(axisIndex);
         return {
             id: `trace-${index}`,
             name: trace.name,
@@ -149,7 +146,6 @@ function seriesOptions(traces, layout) {
             },
             itemStyle: { color: trace.line?.color },
             emphasis: { disabled: true },
-            markLine,
             markPoint: annotation ? {
                 silent: true,
                 symbol: 'circle',
@@ -168,6 +164,25 @@ function seriesOptions(traces, layout) {
                 data: [{ coord: [annotation.x, annotation.y] }]
             } : undefined
         };
+    }).concat(markerSeriesOptions(layout));
+}
+
+function markerSeriesOptions(layout, includeEmpty = false) {
+    const axes = layout.xaxis2 || layout.yaxis2 ? [0, 1] : [0];
+    return axes.flatMap(axisIndex => {
+        const markLine = markerData(layout, axisIndex);
+        if (!markLine && !includeEmpty) return [];
+        return [{
+            id: `markers-${axisIndex}`,
+            type: 'line',
+            xAxisIndex: axisIndex,
+            yAxisIndex: axisIndex,
+            data: [],
+            symbol: 'none',
+            silent: true,
+            lineStyle: { opacity: 0 },
+            markLine: markLine || { data: [] }
+        }];
     });
 }
 
@@ -227,27 +242,31 @@ function chartOption(traces, layout, size, selected) {
 }
 
 function liveLayoutSignature(layout) {
+    const { range: _xRange, ...xaxis } = layout.xaxis || {};
+    const { range: _x2Range, ...xaxis2 } = layout.xaxis2 || {};
     return JSON.stringify({
-        xaxis: layout.xaxis,
+        xaxis,
         yaxis: layout.yaxis,
-        xaxis2: layout.xaxis2,
+        xaxis2,
         yaxis2: layout.yaxis2,
         shapes: layout.shapes
     });
 }
 
+function liveXAxisOptions(layout) {
+    return [layout.xaxis, layout.xaxis2].filter(Boolean).map(axis => ({
+        min: axis.autorange !== true && Array.isArray(axis.range) ? axis.range[0] : null,
+        max: axis.autorange !== true && Array.isArray(axis.range) ? axis.range[1] : null,
+        interval: axis.dtick
+    }));
+}
+
 function liveSeriesOptions(traces, layout, includeMarkers) {
-    const markedAxes = new Set();
-    return traces.map((trace, index) => {
-        const axisIndex = trace.xaxis === 'x2' || trace.yaxis === 'y2' ? 1 : 0;
-        const firstOnAxis = !markedAxes.has(axisIndex);
-        markedAxes.add(axisIndex);
-        return {
+    const series = traces.map((trace, index) => ({
             id: `trace-${index}`,
-            data: trace.x.map((x, pointIndex) => [x, trace.y[pointIndex]]),
-            ...(includeMarkers && firstOnAxis ? { markLine: markerData(layout, axisIndex) || { data: [] } } : {})
-        };
-    });
+            data: trace.x.map((x, pointIndex) => [x, trace.y[pointIndex]])
+        }));
+    return includeMarkers ? series.concat(markerSeriesOptions(layout, true)) : series;
 }
 
 export function renderChart(echarts, element, traces, layout, mode = 'full') {
@@ -275,8 +294,9 @@ export function renderChart(echarts, element, traces, layout, mode = 'full') {
     const live = mode === 'live' && state.traceCount === traces.length;
     if (live) {
         const layoutChanged = state.liveLayoutSignature !== signature;
+        const axes = layoutChanged ? axesOptions(layout, traces) : null;
         state.chart.setOption({
-            ...(layoutChanged ? axesOptions(layout, traces) : {}),
+            ...(axes || { xAxis: liveXAxisOptions(layout) }),
             series: liveSeriesOptions(traces, layout, layoutChanged)
         }, { notMerge: false, lazyUpdate: true, silent: true });
     } else {

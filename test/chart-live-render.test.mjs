@@ -92,14 +92,14 @@ test('live chart frames are paint-aligned, deferred while hidden, and expanded i
     chart.finalizeLiveChart();
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(options.at(-1).animation, false);
-    assert.equal(options.at(-1).xAxis[0].max, null);
+    assert.ok(options.at(-1).xAxis[0].max > 4);
 
     chart.openExpandedChart();
     await new Promise(resolve => setTimeout(resolve, 20));
     const expanded = options.at(-1);
     assert.equal(expanded.grid.length, 2);
     assert.equal(expanded.series.length, 9);
-    assert.equal(expanded.series.filter(series => series.xAxisIndex === 1 && series.yAxisIndex === 1).length, 4);
+    assert.equal(expanded.series.filter(series => series.id.startsWith('trace-') && series.xAxisIndex === 1 && series.yAxisIndex === 1).length, 4);
     assert.equal(typeof handlers.legendselectchanged, 'function');
     chart.closeExpandedChart();
     await new Promise(resolve => setTimeout(resolve, 0));

@@ -82,6 +82,7 @@ test('ECharts loads after first paint only on chart-bearing routes', () => {
     assert.match(chart, /const echarts = await loadECharts\(\)/);
     assert.match(loader, /requestAnimationFrame/);
     assert.match(loader, /import\('\.\/echarts-streamline\.min\.js'\)/);
+    assert.match(loader, /catch\(error => \{\s*echartsPromise = null;/);
 });
 
 test('core startup does not wait for Visualizer verification', () => {

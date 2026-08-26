@@ -395,6 +395,22 @@ function applyLabelLayout(layout) {
     layout.margin = { ...(layout.margin || {}), r: 50 };
 }
 
+function applyFinalXRange(layout) {
+    let dataMax = 0;
+    for (const traceName in chartData) {
+        if (traceName === 'targetPressure' || traceName === 'targetFlow' || traceName === 'targetTemperature') continue;
+        const trace = chartData[traceName];
+        const lastX = trace.x.at(-1);
+        if (lastX > dataMax) dataMax = lastX;
+    }
+    if (dataMax === 0) {
+        const { range: _range, ...xaxis } = layout.xaxis;
+        layout.xaxis = { ...xaxis, autorange: true };
+        return;
+    }
+    layout.xaxis = { ...layout.xaxis, range: [0, rangeMaxForLabels(dataMax)], autorange: false };
+}
+
 // True from shot start until finalizeLiveChart() runs at shot end — labels
 // are suppressed entirely while true so a live shot shows no trace-end text.
 let isLiveShot = false;
@@ -407,9 +423,8 @@ export function finalizeLiveChart() {
     isLiveShot = false;
     const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
-    const { range: _range, ...xaxis } = layout.xaxis;
-    layout.xaxis = { ...xaxis, autorange: true };
     applyLabelLayout(layout);
+    applyFinalXRange(layout);
     renderMain(chartTraces, layout);
 }
 
@@ -424,26 +439,10 @@ export function refreshLabelMargin() {
     // this unconditionally regardless of which page is actually showing.
     if (element.offsetParent === null && !expandedOpen) return;
 
-    // Find current data max across labelled traces.
-    let dataMax = 0;
-    for (const traceName in chartData) {
-        if (traceName === 'targetPressure' || traceName === 'targetFlow' || traceName === 'targetTemperature') continue;
-        const trace = chartData[traceName];
-        if (trace.x.length === 0) continue;
-        const lastX = trace.x[trace.x.length - 1];
-        if (lastX > dataMax) dataMax = lastX;
-    }
     const theme = currentTheme;
     const layout = theme === 'dark' ? darkLayout : lightLayout;
     applyLabelLayout(layout);
-    if (dataMax === 0) {
-        layout.xaxis = { ...layout.xaxis, autorange: true };
-        renderMain(chartTraces, layout);
-        return;
-    }
-
-    const rangeMax = rangeMaxForLabels(dataMax);
-    layout.xaxis = { ...layout.xaxis, range: [0, rangeMax], autorange: false };
+    applyFinalXRange(layout);
     renderMain(chartTraces, layout);
 }
 

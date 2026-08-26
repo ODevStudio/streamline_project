@@ -62,7 +62,8 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     assert.equal(option.series[1].silent, true);
     assert.equal(option.series[1].triggerEvent, false);
     assert.equal(option.series[1].lineStyle.type, 'dotted');
-    assert.equal(option.series[0].markLine.data[0].lineStyle.type, 'dashed');
+    assert.equal(option.series[2].markLine.data[0].lineStyle.type, 'dashed');
+    assert.equal(option.series[0].markLine, undefined);
     assert.deepEqual(option.series[0].markPoint.label.offset, [0, 4]);
     assert.equal(option.series[1].markPoint, undefined);
     assert.equal(calls[0].settings.lazyUpdate, false);
@@ -71,7 +72,19 @@ test('renderer preserves Plotly geometry, line styling, markers, labels, and cap
     assert.equal(calls[1].settings.lazyUpdate, true);
     assert.equal(calls[1].option.grid, undefined);
     assert.equal(calls[1].option.legend, undefined);
+    assert.equal(calls[1].option.yAxis, undefined);
+    assert.deepEqual([calls[1].option.xAxis[0].min, calls[1].option.xAxis[0].max], [0, 1.2]);
     assert.deepEqual(Object.keys(calls[1].option.series[0]), ['id', 'data']);
+    assert.equal(calls[1].option.series.length, 2);
+
+    renderChart(echarts, element, traces, { ...layout, xaxis: { ...layout.xaxis, range: [0, 2.4] } }, 'live');
+    assert.equal(calls[2].option.yAxis, undefined);
+    assert.deepEqual([calls[2].option.xAxis[0].min, calls[2].option.xAxis[0].max], [0, 2.4]);
+
+    renderChart(echarts, element, traces, { ...layout, shapes: [], yaxis: { ...layout.yaxis, range: [0, 12] } }, 'live');
+    assert.equal(calls[3].option.series.length, 3);
+    assert.equal(calls[3].option.series[2].id, 'markers-0');
+    assert.deepEqual(calls[3].option.series[2].markLine.data, []);
 
     handlers.mousemove({ seriesName: 'Pressure', color: '#17c29a', event: { offsetX: 120, offsetY: 80 } });
     assert.equal(label.textContent, 'Pressure');
@@ -123,8 +136,8 @@ test('expanded renderer uses two grids with synchronized time axes and mirrored 
     assert.equal(option.legend.length, 2);
     assert.deepEqual([option.xAxis[0].min, option.xAxis[0].max], [1, 7]);
     assert.deepEqual([option.xAxis[1].min, option.xAxis[1].max], [1, 7]);
-    assert.equal(option.series[0].markLine.data[0].xAxis, 4);
-    assert.equal(option.series[1].markLine.data[0].xAxis, 4);
+    assert.equal(option.series[2].markLine.data[0].xAxis, 4);
+    assert.equal(option.series[3].markLine.data[0].xAxis, 4);
     destroyChart(element);
 });
 
